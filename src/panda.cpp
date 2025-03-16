@@ -5,17 +5,20 @@
 
 #include "raisim/World.hpp"
 #include "raisim/RaisimServer.hpp"
-
-#define _MAKE_STR(x) __MAKE_STR(x)
-#define __MAKE_STR(x) #x
+#include <cstdlib> 
 
 int main() {
   raisim::World world;
   world.addGround();
-
   raisim::RaisimServer server(&world);
 
-  auto panda = world.addArticulatedSystem(std::string(_MAKE_STR(RESOURCE_DIR)) + "/Panda/panda.urdf");
+  const char* resourceDir = std::getenv("RESOURCE_DIR");
+  if (!resourceDir) {
+    std::cerr << "RESOURCE_DIR environment variable not set" << std::endl;
+    return 1;
+  }
+  
+  auto panda = world.addArticulatedSystem(std::string(resourceDir) + "/Panda/panda.urdf");
 
   server.launchServer();
 

@@ -1,8 +1,6 @@
 #include "raisim/World.hpp"
 #include "raisim/RaisimServer.hpp"
-
-#define _MAKE_STR(x) __MAKE_STR(x)
-#define __MAKE_STR(x) #x
+#include <cstdlib> 
 
 int main() {
   raisim::World world;
@@ -10,11 +8,16 @@ int main() {
 
   raisim::RaisimServer server(&world);
 
-  auto monkey = server.addVisualMesh("monkey", std::string(_MAKE_STR(RESOURCE_DIR)) + "/monkey/monkey.obj");
+  const char* resourceDir = std::getenv("RESOURCE_DIR");
+  if (!resourceDir) {
+    std::cerr << "RESOURCE_DIR environment variable not set" << std::endl;
+    return 1;
+  }
+  auto monkey = server.addVisualMesh("monkey", std::string(resourceDir) + "/monkey/monkey.obj");
   monkey->setColor(0,0,1,1);
   monkey->setPosition(2.5,0,1);
 
-  auto monkey_reference = server.addVisualMesh("monkey_reference", std::string(_MAKE_STR(RESOURCE_DIR)) + "/monkey/monkey.obj");
+  auto monkey_reference = server.addVisualMesh("monkey_reference", std::string(resourceDir) + "/monkey/monkey.obj");
   monkey_reference->setPosition(0,0,1);
 
   double angle = M_PI_2;
