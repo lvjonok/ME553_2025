@@ -15,16 +15,16 @@ int main(int argc, char* argv[]) {
   raisim::RaisimServer server(&world); // visualization server
   world.addGround();
 
-  // anymal
-  auto anymal = world.addArticulatedSystem(std::string(_MAKE_STR(RESOURCE_DIR)) + "/anymal_c/urdf/anymal.urdf");
-  anymal->setName("anymal");
-  server.focusOn(anymal);
+  // panda
+  auto panda = world.addArticulatedSystem(std::string(_MAKE_STR(RESOURCE_DIR)) + "/Panda/panda.urdf");
+  panda->setName("panda");
+  server.focusOn(panda);
 
-  // anymal configuration
-  Eigen::VectorXd jointNominalConfig(anymal->getGeneralizedCoordinateDim());
-  jointNominalConfig << 0, 0, 0.54, 1.0, 0.0, 0.0, 0.0, 0.03, 0.4, -0.8, -0.03, 0.4, -0.8, 0.03, -0.4, 0.8, -0.03, -0.4, 0.8;
-  anymal->setGeneralizedCoordinate(jointNominalConfig);
-  anymal->updateKinematics();
+  // panda configuration
+  Eigen::VectorXd jointNominalConfig(panda->getGeneralizedCoordinateDim());
+  jointNominalConfig << 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.05, 0.05;
+  panda->setGeneralizedCoordinate(jointNominalConfig);
+  panda->updateKinematics();
 
   // debug sphere
   auto debugSphere = server.addVisualSphere("debug_sphere", 0.02);
@@ -32,10 +32,10 @@ int main(int argc, char* argv[]) {
   debugSphere->setPosition(getEndEffectorPosition(jointNominalConfig));
 
   // solution sphere
-  auto answerSphere = server.addVisualSphere("answer_sphere", 0.04);
+  auto answerSphere = server.addVisualSphere("answer_sphere", 0.02);
   answerSphere->setColor(0,1,0,1);
   raisim::Vec<3> pos;
-  anymal->getFramePosition("panda_finger_joint3", pos);
+  panda->getFramePosition("panda_finger_joint3", pos);
   answerSphere->setPosition(pos.e());
 
   // visualization
