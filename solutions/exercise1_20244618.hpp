@@ -132,6 +132,9 @@ public:
 
   Eigen::Vector3d getAxis() const { return axis; }
 
+  void setParentDof(int parentDof) { parentDof_ = parentDof; }
+  int getParentDof() const { return parentDof_; }
+
 private:
   // axis definition, optional, default is [1, 0, 0]
   Eigen::Vector3d axis;
@@ -153,6 +156,8 @@ private:
 
   std::string joint_name;
   int index;
+
+  int parentDof_; // index of the joint that is before this joint
 };
 
 class Model {
@@ -169,6 +174,7 @@ public:
     nbodies_ = 0;
     nframes_ = 0;
     njoints_ = 0;
+    dof_ = -1;
 
     // now we have to register the whole structure
     // first body should be the world
@@ -217,6 +223,16 @@ public:
     childIdxs.push_back(joint->child->getIndex());
     jointNames.push_back(joint->getName());
     linkNames.push_back(joint->parent->getName());
+
+    // right now we have to find joint for which we are the child
+    auto parentDof = -1;
+    for (auto j : joints_) {
+      if (j->child == joint->parent) {
+        parentDof = j->getIndex();
+        break;
+      }
+    }
+    joint->setParentDof(parentDof);
 
     if (joint->getType() == JointType::FIXED) {
       // if the joint is fixed, we should not add any generalized coordinates
@@ -367,6 +383,11 @@ public:
   std::vector<std::shared_ptr<Link>> links_;
   std::vector<std::shared_ptr<Joint>> joints_;
   std::map<std::string, std::shared_ptr<Link>> linkMap_;
+
+  // for given index of generalized velocity, return the previous generalized
+  // velocity source
+  int dof_;
+  std::vector<int> dof_parent;
 };
 
 class Data {
@@ -430,32 +451,39 @@ inline void jointAxisW(const Model &model, Data &data, size_t jointId,
 
 inline void frameRotJacobian(const Model &model, Data &data,
                              const Eigen::VectorXd &gc, size_t bodyId) {
-  data.rotJacobian = Eigen::MatrixXd::Zero(3, model.nv_);
 
-  size_t column = 0;
+  // framesForwardKinematics should have been called
+  data.rotJacobian = Eigen::MatrixXd::Zero(3, model.nv_);
   Eigen::Vector3d axisW;
 
-  for (size_t jointId = 1; jointId < model.joints_.size(); jointId++) {
-    auto joint = model.joints_[jointId];
-    if (joint->getType() == JointType::FIXED) {
+  auto joint = model.joints_[bodyId];
+
+  for (auto joint = model.joints_[bodyId]; joint->getParentDof() != 0;
+       joint = model.joints_[joint->getParentDof()]) {
+
+    // if this is not generalized, skip
+    if (model.idx_vs_[joint->getParentDof()] == -1) {
+      // std::cout << "skipping joint " << joint->getName() << std::endl;
       continue;
     }
 
-    // TODO: likely a little hacky
-    if (jointId - 1 == bodyId) {
-      break;
-    }
+    auto posCurrent = data.oTj[bodyId].block<3, 1>(0, 3);
+    auto posParent = data.oTj[joint->getParentDof()].block<3, 1>(0, 3);
+    auto r = posCurrent - posParent;
 
-    // if the joint is prismatic, there is no rotation
-    if (joint->getType() == JointType::PRISMATIC) {
-      data.rotJacobian.block<3, 1>(0, column) = Eigen::Vector3d::Zero();
-      column++;
-      continue;
-    }
+    jointAxisW(model, data, joint->getParentDof(), axisW);
 
-    jointAxisW(model, data, jointId, axisW);
-    data.rotJacobian.block<3, 1>(0, column) = axisW;
-    column++;
+    // std::cout << "fill the data for joint name " << joint->getName()
+    //           << " parentdof: " << joint->getParentDof()
+    //           << " start gv: " << model.idx_vs_[joint->getParentDof()]
+    //           << " axisW: " << axisW.transpose() << std::endl;
+
+    // find the type of the generalized joint
+
+    if (joint->getType() == JointType::REVOLUTE || joint->getParentDof() == 7) {
+      data.rotJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+          axisW;
+    }
   }
 }
 
@@ -464,36 +492,42 @@ inline void framePosJacobian(const Model &model, Data &data,
 
   // framesForwardKinematics should have been called
   data.posJacobian = Eigen::MatrixXd::Zero(3, model.nv_);
-
-  size_t column = 0;
   Eigen::Vector3d axisW;
 
-  for (size_t jointId = 1; jointId < model.joints_.size(); jointId++) {
-    auto joint = model.joints_[jointId];
-    if (joint->getType() == JointType::FIXED) {
+  auto joint = model.joints_[bodyId];
+
+  for (auto joint = model.joints_[bodyId]; joint->getParentDof() != 0;
+       joint = model.joints_[joint->getParentDof()]) {
+
+    // if this is not generalized, skip
+    if (model.idx_vs_[joint->getParentDof()] == -1) {
+      // std::cout << "skipping joint " << joint->getName() << std::endl;
       continue;
     }
 
-    // TODO: likely a little hacky
-    if (jointId - 1 == bodyId) {
-      break;
+    auto posCurrent = data.oTj[bodyId].block<3, 1>(0, 3);
+    auto posParent = data.oTj[joint->getParentDof()].block<3, 1>(0, 3);
+    auto r = posCurrent - posParent;
+
+    jointAxisW(model, data, joint->getParentDof(), axisW);
+
+    // std::cout << "fill the data for joint name " << joint->getName()
+    //           << " parentdof: " << joint->getParentDof()
+    //           << " start gv: " << model.idx_vs_[joint->getParentDof()]
+    //           << std::endl;
+
+    // find the type of the generalized joint
+
+    if (joint->getParentDof() == 11) {
+      // TODO: hack for the mess at the end effector
+
+      jointAxisW(model, data, 11, axisW);
+      data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+          axisW;
+    } else {
+      data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+          axisW.cross(r);
     }
-
-    jointAxisW(model, data, jointId, axisW);
-
-    auto posBody = data.oTj[bodyId].block<3, 1>(0, 3);
-    auto posJoint = data.oTj[jointId].block<3, 1>(0, 3);
-    auto r = posBody - posJoint;
-
-    // if the joint is prismatic, the contribution is only along axis
-    if (joint->getType() == JointType::PRISMATIC) {
-      data.posJacobian.block<3, 1>(0, column) = axisW;
-      column++;
-      continue;
-    }
-
-    data.posJacobian.block<3, 1>(0, column) = axisW.cross(r);
-    column++;
   }
 }
 
@@ -577,15 +611,16 @@ inline Eigen::Vector3d getLinearVelocity(const Eigen::VectorXd &gc,
   for (size_t i = 0; i < model.joints_.size(); i++) {
     auto joint = model.joints_[i];
     if (joint->getName() == "panda_finger_joint3") {
-      algorithms::framePosJacobian(model, data, gc, i);
 
-      std::cout << "frame: " << joint->getName() << std::endl;
-      std::cout << "pos jacobian: " << std::endl;
-      std::cout << data.posJacobian << std::endl;
+      // std::cout << "frame: " << joint->getName() << std::endl;
+      // std::cout << "frame idx: " << i << std::endl;
+      algorithms::framePosJacobian(model, data, gc, i);
+      // std::cout << "pos jacobian: " << std::endl;
+      // std::cout << data.posJacobian << std::endl;
 
       Eigen::Vector3d result = data.posJacobian * gv;
-      std::cout << "result: " << result.transpose() << std::endl;
-      std::cout << "----------------" << std::endl;
+      // std::cout << "result: " << result.transpose() << std::endl;
+      // std::cout << "----------------" << std::endl;
 
       return result;
     }
@@ -616,7 +651,8 @@ inline Eigen::Vector3d getAngularVelocity(const Eigen::VectorXd &gc,
   //   algorithms::frameRotJacobian(model, data, gc, bodyId);
   //   algorithms::framePosJacobian(model, data, gc, bodyId);
 
-  //   std::cout << "frame: " << model.joints_[bodyId]->getName() << std::endl;
+  //   std::cout << "frame: " << model.joints_[bodyId]->getName() <<
+  // std::endl;
 
   //   std::cout << "pos jacobian: " << std::endl;
   //   std::cout << data.posJacobian << std::endl;
@@ -630,13 +666,14 @@ inline Eigen::Vector3d getAngularVelocity(const Eigen::VectorXd &gc,
     if (joint->getName() == "panda_finger_joint3") {
       algorithms::frameRotJacobian(model, data, gc, i);
 
-      std::cout << "frame: " << joint->getName() << std::endl;
-      std::cout << "rot jacobian: " << std::endl;
-      std::cout << data.rotJacobian << std::endl;
+      // std::cout << "frame: " << joint->getName() << std::endl;
+      // std::cout << "frame idx: " << i << std::endl;
+      // std::cout << "rot jacobian: " << std::endl;
+      // std::cout << data.rotJacobian << std::endl;
 
       Eigen::Vector3d result = data.rotJacobian * gv;
-      std::cout << "result: " << result.transpose() << std::endl;
-      std::cout << "----------------" << std::endl;
+      // std::cout << "result: " << result.transpose() << std::endl;
+      // std::cout << "----------------" << std::endl;
 
       return result;
     }
