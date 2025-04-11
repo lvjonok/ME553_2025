@@ -130,6 +130,8 @@ public:
 
   int getIndex() const { return index; }
 
+  Eigen::Vector3d getAxis() const { return axis; }
+
 private:
   // axis definition, optional, default is [1, 0, 0]
   Eigen::Vector3d axis;
@@ -291,7 +293,7 @@ public:
                                     std::shared_ptr<Link> child) {
     // Optional fields
     auto axisField = jointXML.FirstChildElement("axis");
-    Eigen::Vector3d axis = Eigen::Vector3d(1, 0, 0);
+    Eigen::Vector3d axis = Eigen::Vector3d(0, 0, 1);
     if (axisField != nullptr) {
       auto axisStr = axisField->Attribute("xyz");
       // parse axis
@@ -371,30 +373,39 @@ class Data {
 public:
   Data(const Model &model) {};
 
-  // joint-placement transformations wrt world frame
+  // links with respect to world frame
+  std::vector<Transform> oTb;
+
+  // joints with respect to world frame
   std::vector<Transform> oTj;
 
-  // frames wrt world frame
-  std::vector<Transform> oTf;
+  // frames velocities
+  std::vector<Eigen::Vector3d> bodyLinVel_w;
+  std::vector<Eigen::Vector3d> bodyAngVel_w;
 
   // link frames
   std::vector<Transform> oTw;
+
+  // jacobian
+  Eigen::MatrixXd posJacobian;
+  Eigen::MatrixXd rotJacobian;
 };
 
 namespace algorithms {
-inline void forwardKinematics(const Model &model, Data &data,
-                              const Eigen::VectorXd &gc) {
-  // compute the forward kinematics of the robot
-  data.oTj.resize(model.links_.size());
-  data.oTj[0] = Transform::Identity();
 
-  data.oTf.resize(model.joints_.size());
-  data.oTf[0] = Transform::Identity();
+inline void framesForwardKinematics(const Model &model, Data &data,
+                                    const Eigen::VectorXd &gc) {
+  // compute the forward kinematics of the robot
+  data.oTb.resize(model.links_.size());
+  data.oTb[0] = Transform::Identity();
+
+  data.oTj.resize(model.joints_.size());
+  data.oTj[0] = Transform::Identity();
 
   // first, update all the placements of the joints
   for (size_t i = 0; i < model.joints_.size(); i++) {
     auto joint = model.joints_[i];
-    auto parentFrame = data.oTj[joint->parent->getIndex()];
+    auto parentFrame = data.oTb[joint->parent->getIndex()];
     Transform jointFrame = parentFrame * joint->jointPlacement();
 
     // if joint is not fixed, apply the motion
@@ -403,20 +414,93 @@ inline void forwardKinematics(const Model &model, Data &data,
       jointFrame = jointFrame * motion;
     }
 
-    data.oTj[joint->child->getIndex()] = jointFrame;
+    data.oTb[joint->child->getIndex()] = jointFrame;
 
-    data.oTf[i] = jointFrame;
-
-    // std::cout << "====================" << std::endl;
-    // std::cout << "joint: " << joint->getName() << std::endl;
-    // std::cout << "parent idx: " << joint->parent->getIndex() << std::endl;
-    // std::cout << "parent body: " << joint->parent->getName() << std::endl;
-    // std::cout << "child idx: " << joint->child->getIndex() << std::endl;
-    // std::cout << "child body: " << joint->child->getName() << std::endl;
-    // std::cout << "parent T: " << parentFrame << std::endl;
-    // std::cout << "joint placement: " << joint->jointPlacement() << std::endl;
-    // std::cout << "T: " << jointFrame << std::endl;
+    data.oTj[i] = jointFrame;
   }
+}
+
+inline void jointAxisW(const Model &model, Data &data, size_t jointId,
+                       Eigen::Vector3d &axisW) {
+  // get the axis of the joint in the world frame
+  auto joint = data.oTj[jointId];
+  Eigen::Matrix3d R = joint.block<3, 3>(0, 0);
+  axisW = R * model.joints_[jointId]->getAxis();
+}
+
+inline void frameRotJacobian(const Model &model, Data &data,
+                             const Eigen::VectorXd &gc, size_t bodyId) {
+  data.rotJacobian = Eigen::MatrixXd::Zero(3, model.nv_);
+
+  size_t column = 0;
+  Eigen::Vector3d axisW;
+
+  for (size_t jointId = 1; jointId < model.joints_.size(); jointId++) {
+    auto joint = model.joints_[jointId];
+    if (joint->getType() == JointType::FIXED) {
+      continue;
+    }
+
+    // TODO: likely a little hacky
+    if (jointId - 1 == bodyId) {
+      break;
+    }
+
+    // if the joint is prismatic, there is no rotation
+    if (joint->getType() == JointType::PRISMATIC) {
+      data.rotJacobian.block<3, 1>(0, column) = Eigen::Vector3d::Zero();
+      column++;
+      continue;
+    }
+
+    jointAxisW(model, data, jointId, axisW);
+    data.rotJacobian.block<3, 1>(0, column) = axisW;
+    column++;
+  }
+}
+
+inline void framePosJacobian(const Model &model, Data &data,
+                             const Eigen::VectorXd &gc, size_t bodyId) {
+
+  // framesForwardKinematics should have been called
+  data.posJacobian = Eigen::MatrixXd::Zero(3, model.nv_);
+
+  size_t column = 0;
+  Eigen::Vector3d axisW;
+
+  for (size_t jointId = 1; jointId < model.joints_.size(); jointId++) {
+    auto joint = model.joints_[jointId];
+    if (joint->getType() == JointType::FIXED) {
+      continue;
+    }
+
+    // TODO: likely a little hacky
+    if (jointId - 1 == bodyId) {
+      break;
+    }
+
+    jointAxisW(model, data, jointId, axisW);
+
+    auto posBody = data.oTj[bodyId].block<3, 1>(0, 3);
+    auto posJoint = data.oTj[jointId].block<3, 1>(0, 3);
+    auto r = posBody - posJoint;
+
+    // if the joint is prismatic, the contribution is only along axis
+    if (joint->getType() == JointType::PRISMATIC) {
+      data.posJacobian.block<3, 1>(0, column) = axisW;
+      column++;
+      continue;
+    }
+
+    data.posJacobian.block<3, 1>(0, column) = axisW.cross(r);
+    column++;
+  }
+}
+
+inline void forwardKinematics(const Model &model, Data &data,
+                              const Eigen::VectorXd &gc) {
+  Eigen::VectorXd v = Eigen::VectorXd::Zero(model.nv_);
+  algorithms::framesForwardKinematics(model, data, gc);
 }
 }; // namespace algorithms
 
@@ -438,7 +522,7 @@ inline Eigen::Vector3d getEndEffectorPosition(const Eigen::VectorXd &gc) {
   for (size_t i = 0; i < model.joints_.size(); i++) {
     auto joint = model.joints_[i];
     if (joint->getName() == "panda_finger_joint3") {
-      auto frame = data.oTf[i];
+      auto frame = data.oTj[i];
       Eigen::Vector3d pos = frame.block<3, 1>(0, 3);
       return pos;
     }
@@ -455,6 +539,108 @@ inline Eigen::Vector3d getEndEffectorPosition(const Eigen::VectorXd &gc) {
   //   std::cout <<  << std::endl;
   //   // joint->jointPlacement();
   // }
+
+  return Eigen::Vector3d::Ones(); /// replace this
+}
+
+/// do not change the name of the method
+inline Eigen::Vector3d getLinearVelocity(const Eigen::VectorXd &gc,
+                                         const Eigen::VectorXd &gv) {
+  //////////////////////////
+  ///// Your Code Here /////
+  //////////////////////////
+
+  Model model(
+      "/home/lvjonok/github.com/lvjonok/ME553_2025/resource/Panda/panda.urdf");
+  Data data(model);
+
+  algorithms::framesForwardKinematics(model, data, gc);
+
+  // std::cout << "model body names: " << std::endl;
+  // for (auto link : model.links_) {
+  //   std::cout << link->getIndex() << ": " << link->getName() << std::endl;
+  // }
+
+  // for (size_t bodyId = 0; bodyId < 10; bodyId++) {
+  //   algorithms::frameRotJacobian(model, data, gc, bodyId);
+  //   algorithms::framePosJacobian(model, data, gc, bodyId);
+
+  //   std::cout << "frame: " << model.joints_[bodyId]->getName() << std::endl;
+
+  //   std::cout << "pos jacobian: " << std::endl;
+  //   std::cout << data.posJacobian << std::endl;
+  //   std::cout << "rot jacobian: " << std::endl;
+  //   std::cout << data.rotJacobian << std::endl;
+  //   std::cout << "----------------" << std::endl;
+  // }
+
+  for (size_t i = 0; i < model.joints_.size(); i++) {
+    auto joint = model.joints_[i];
+    if (joint->getName() == "panda_finger_joint3") {
+      algorithms::framePosJacobian(model, data, gc, i);
+
+      std::cout << "frame: " << joint->getName() << std::endl;
+      std::cout << "pos jacobian: " << std::endl;
+      std::cout << data.posJacobian << std::endl;
+
+      Eigen::Vector3d result = data.posJacobian * gv;
+      std::cout << "result: " << result.transpose() << std::endl;
+      std::cout << "----------------" << std::endl;
+
+      return result;
+    }
+  }
+
+  return Eigen::Vector3d::Ones(); /// replace this
+}
+
+/// do not change the name of the method
+inline Eigen::Vector3d getAngularVelocity(const Eigen::VectorXd &gc,
+                                          const Eigen::VectorXd &gv) {
+  //////////////////////////
+  ///// Your Code Here /////
+  //////////////////////////
+
+  Model model(
+      "/home/lvjonok/github.com/lvjonok/ME553_2025/resource/Panda/panda.urdf");
+  Data data(model);
+
+  algorithms::framesForwardKinematics(model, data, gc);
+
+  // std::cout << "model body names: " << std::endl;
+  // for (auto link : model.links_) {
+  //   std::cout << link->getIndex() << ": " << link->getName() << std::endl;
+  // }
+
+  // for (size_t bodyId = 0; bodyId < 10; bodyId++) {
+  //   algorithms::frameRotJacobian(model, data, gc, bodyId);
+  //   algorithms::framePosJacobian(model, data, gc, bodyId);
+
+  //   std::cout << "frame: " << model.joints_[bodyId]->getName() << std::endl;
+
+  //   std::cout << "pos jacobian: " << std::endl;
+  //   std::cout << data.posJacobian << std::endl;
+  //   std::cout << "rot jacobian: " << std::endl;
+  //   std::cout << data.rotJacobian << std::endl;
+  //   std::cout << "----------------" << std::endl;
+  // }
+
+  for (size_t i = 0; i < model.joints_.size(); i++) {
+    auto joint = model.joints_[i];
+    if (joint->getName() == "panda_finger_joint3") {
+      algorithms::frameRotJacobian(model, data, gc, i);
+
+      std::cout << "frame: " << joint->getName() << std::endl;
+      std::cout << "rot jacobian: " << std::endl;
+      std::cout << data.rotJacobian << std::endl;
+
+      Eigen::Vector3d result = data.rotJacobian * gv;
+      std::cout << "result: " << result.transpose() << std::endl;
+      std::cout << "----------------" << std::endl;
+
+      return result;
+    }
+  }
 
   return Eigen::Vector3d::Ones(); /// replace this
 }
