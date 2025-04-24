@@ -49,6 +49,72 @@ inline void jointAxisW(const Model &model, Data &data, size_t jointId,
   axisW = R * model.joints_[jointId]->getAxis();
 }
 
+inline void checkStructure(const Model &model, Data &data, size_t bodyId) {
+  // we simulate as we are doing backward pass from the bodyid to the root
+  // check that with parentDof we only get the actuated joints (i.e. not fixed)
+
+  data.rotJacobian = Eigen::MatrixXd::Zero(3, model.nv_);
+  data.posJacobian = Eigen::MatrixXd::Zero(3, model.nv_);
+  auto joint = model.joints_[bodyId];
+
+  //   // skip fixed bodies
+  //   while (joint->getType() == JointType::FIXED) {
+  //     std::cout << "skipping joint " << joint->getName() << std::endl;
+  //     joint = model.joints_[joint->getParentDof()];
+  //   }
+
+  Eigen::Vector3d axisW;
+
+  auto parentDof = joint->getParentDof();
+  while (parentDof >= 0) {
+    auto columnIdx = model.idx_vs_[parentDof];
+
+    std::cout << "joint name " << joint->getName()
+              << " parentdof: " << joint->getParentDof()
+              << " column: " << columnIdx << std::endl;
+
+    jointAxisW(model, data, parentDof, axisW);
+
+    auto posCurrent = data.oTj[bodyId].block<3, 1>(0, 3);
+    auto posParent = data.oTj[joint->getParentDof()].block<3, 1>(0, 3);
+    auto r = posCurrent - posParent;
+
+    // fill if the joint is revolute
+    data.rotJacobian.block<3, 1>(0, columnIdx) = axisW;
+    // if (joint->getType() == JointType::REVOLUTE) {
+    // } else {
+    //   std::cout << "skipping joint " << joint->getName()
+    //             << " column: " << columnIdx << std::endl;
+    // }
+
+    // positional jacobian
+    if (joint->getType() == JointType::REVOLUTE) {
+      data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+          axisW.cross(r);
+    } else if (joint->getType() == JointType::PRISMATIC) {
+      data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+          axisW;
+    } else {
+      std::cout << "skipping joint " << joint->getName()
+                << " column: " << columnIdx << std::endl;
+    }
+
+    // kinematic chain iteration
+    joint = model.joints_[parentDof];
+    parentDof = joint->getParentDof();
+  }
+
+  //   for (auto joint = model.joints_[bodyId]; joint->parent->getName() !=
+  //   "world";
+  //        joint = model.joints_[joint->getParentDof()]) {
+
+  //     std::cout << "joint name " << joint->getName() << " parentdof: "
+  //               << joint->getParentDof()
+  //               //   << " start gv: " << model.idx_vs_[joint->getParentDof()]
+  //               << std::endl;
+  //   }
+}
+
 inline void frameRotJacobian(const Model &model, Data &data,
                              const Eigen::VectorXd &gc, size_t bodyId) {
 
@@ -264,14 +330,20 @@ inline Eigen::Vector3d getAngularVelocity(const Eigen::VectorXd &gc,
   for (size_t i = 0; i < model.joints_.size(); i++) {
     auto joint = model.joints_[i];
     if (joint->getName() == "panda_finger_joint3") {
-      algorithms::frameRotJacobian(model, data, gc, i);
 
-      // std::cout << "frame: " << joint->getName() << std::endl;
-      // std::cout << "frame idx: " << i << std::endl;
-      // std::cout << "rot jacobian: " << std::endl;
-      // std::cout << data.rotJacobian << std::endl;
+      algorithms::checkStructure(model, data, i);
 
-      Eigen::Vector3d result = data.rotJacobian * gv;
+      //   algorithms::frameRotJacobian(model, data, gc, i);
+
+      std::cout << "frame: " << joint->getName() << std::endl;
+      std::cout << "frame idx: " << i << std::endl;
+      std::cout << "own rot jacobian: " << std::endl;
+      std::cout << data.rotJacobian << std::endl;
+
+      std::cout << "own pos jacobian: " << std::endl;
+      std::cout << data.posJacobian << std::endl;
+
+      Eigen::Vector3d result = Eigen::Vector3d::Zero();
       // std::cout << "result: " << result.transpose() << std::endl;
       // std::cout << "----------------" << std::endl;
 

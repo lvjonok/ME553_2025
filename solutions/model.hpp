@@ -157,7 +157,7 @@ private:
   std::string joint_name;
   int index;
 
-  int parentDof_; // index of the joint that is before this joint
+  int parentDof_ = -2; // index of the joint that is before this joint
 };
 
 class Model {
@@ -224,15 +224,58 @@ public:
     jointNames.push_back(joint->getName());
     linkNames.push_back(joint->parent->getName());
 
-    // right now we have to find joint for which we are the child
+    // right now we have to find out, which actuated joint is the parent of this
     auto parentDof = -1;
-    for (auto j : joints_) {
-      if (j->child == joint->parent) {
-        parentDof = j->getIndex();
-        break;
+    std::cout << "Looking for parentDof for joint " << joint->getName()
+              << " with index " << joint->getIndex() << std::endl;
+
+    auto iterJoint = joint;
+    while (iterJoint->parent->getName() != "world") {
+
+      bool foundActuatedParent = false;
+
+      while (!foundActuatedParent) {
+        auto parentLink = iterJoint->parent;
+        // find for which joint the parent link is the child
+        for (auto j : joints_) {
+          if (j->child == parentLink) {
+            iterJoint = j;
+            break;
+          }
+        }
+
+        // std::cout << "iterJoint: " << iterJoint->getName()
+        //           << " parentName: " << iterJoint->parent->getName()
+        //           << std::endl;
+
+        // if we are at the world, we should break
+        if (iterJoint->parent->getName() == "world") {
+          break;
+        }
+
+        // if we found the actuated joint, we can break
+        if (iterJoint->getType() != JointType::FIXED) {
+          foundActuatedParent = true;
+          parentDof = iterJoint->getIndex();
+          break;
+        }
       }
+
+      // Set the parentDof for the joint
+      joint->setParentDof(parentDof);
+      std::cout << "Found parentDof: " << parentDof << std::endl;
+      break;
     }
-    joint->setParentDof(parentDof);
+
+    // // right now we have to find joint for which we are the child
+    // auto parentDof = -1;
+    // for (auto j : joints_) {
+    //   if (j->child == joint->parent) {
+    //     parentDof = j->getIndex();
+    //     break;
+    //   }
+    // }
+    // joint->setParentDof(parentDof);
 
     if (joint->getType() == JointType::FIXED) {
       // if the joint is fixed, we should not add any generalized coordinates
