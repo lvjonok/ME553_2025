@@ -203,6 +203,74 @@ inline void forwardKinematics(const Model &model, Data &data,
   Eigen::VectorXd v = Eigen::VectorXd::Zero(model.nv_);
   algorithms::framesForwardKinematics(model, data, gc);
 }
+
+// CRBA algorithm
+
+// this function should be called after the forward kinematics
+// it computes the inertia of each link in the world frame
+inline void inertiaUpdate(const Model &model, Data &data,
+                          const Eigen::VectorXd &gc) {
+  data.inertiaW.resize(model.links_.size());
+  data.comW.resize(model.links_.size());
+
+  // find bodies Inertia expressed in the world frame
+  for (size_t i = 0; i < model.links_.size(); i++) {
+    auto link = model.links_[i];
+    auto inertia = link->getInertia();
+
+    auto worldInertia = data.oTb[i].block<3, 3>(0, 0) * inertia *
+                        data.oTb[i].block<3, 3>(0, 0).transpose();
+
+    data.inertiaW[i] = worldInertia;
+
+    // find the center of mass in the world frame
+    auto com = link->getTransform();
+    auto comW = data.oTb[i] * com;
+
+    data.comW[i] = comW; //.block<3, 1>(0, 3);
+
+    std::cout << "body name: " << link->getName() << std::endl;
+    std::cout << "body inertia: " << worldInertia << std::endl;
+  }
+}
+
+inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
+  data.massMatrix = Eigen::MatrixXd::Zero(model.nv_, model.nv_);
+  data.massMatrix.setZero();
+
+  // update the inertia of each link to be in the world frame
+  inertiaUpdate(model, data, gc);
+
+  // iterate from each joint upwards the kinematic chain
+  for (int i = model.joints_.size() - 1; i >= 0; i--) {
+    auto joint = model.joints_[i];
+    auto columnI = model.idx_vs_[joint->getIndex()];
+
+    // now iterate updwards the kinematic chain from i-th joint
+    auto parentDof = joint->getParentDof();
+    auto jointJ = joint;
+    while (true) {
+      auto columnJ = model.idx_vs_[jointJ->getIndex()];
+      // std::cout << "joint name: " << jointJ->getName()
+      //           << " parentdof: " << jointJ->getParentDof()
+      //           << " column: " << columnIdx << std::endl;
+
+      std::cout << "M_" << columnI << "," << columnJ << " = " << parentDof
+                << std::endl;
+
+      if (parentDof == -1) {
+        // std::cout << "Found root: " << jointJ->getName() << std::endl;
+        // std::cout << "check" << std::endl;
+        break;
+      }
+
+      // iteration
+      jointJ = model.joints_[parentDof];
+      parentDof = jointJ->getParentDof();
+    }
+  }
+}
+
 }; // namespace algorithms
 
 #define _MAKE_STR(x) __MAKE_STR(x)
@@ -387,37 +455,41 @@ inline Eigen::MatrixXd getMassMatrix(const Eigen::VectorXd &gc) {
   //   std::cout << "body inertia: " << worldInertia << std::endl;
   // }
 
-  // iterate from leaves towards the root
-  // first, find the leaves
-  std::vector<std::shared_ptr<Joint>> leaves;
-  std::cout << "leaves: " << std::endl;
-  for (auto joint : model.leaves_) {
-    std::cout << "joint name: " << joint->getName() << std::endl;
-  }
+  // // iterate from leaves towards the root
+  // // first, find the leaves
+  // std::vector<std::shared_ptr<Joint>> leaves;
+  // std::cout << "leaves: " << std::endl;
+  // for (auto joint : model.leaves_) {
+  //   std::cout << "joint name: " << joint->getName() << std::endl;
+  // }
 
-  // now starting from each leaf, go up to the root
-  for (auto leaf : model.leaves_) {
-    std::cout << "Starting from leaf: " << leaf->getName() << std::endl;
+  // // now starting from each leaf, go up to the root
+  // for (auto leaf : model.leaves_) {
+  //   std::cout << "Starting from leaf: " << leaf->getName() << std::endl;
 
-    // iterate upwards
-    auto joint = leaf;
-    auto parentDof = joint->getParentDof();
-    while (true) {
-      auto columnIdx = model.idx_vs_[joint->getIndex()];
-      std::cout << "joint name: " << joint->getName()
-                << " parentdof: " << joint->getParentDof()
-                << " column: " << columnIdx << std::endl;
+  //   // iterate upwards
+  //   auto joint = leaf;
+  //   auto parentDof = joint->getParentDof();
+  //   while (true) {
+  //     auto columnIdx = model.idx_vs_[joint->getIndex()];
+  //     std::cout << "joint name: " << joint->getName()
+  //               << " parentdof: " << joint->getParentDof()
+  //               << " column: " << columnIdx << std::endl;
 
-      if (parentDof == -1) {
-        std::cout << "Found root: " << joint->getName() << std::endl;
-        break;
-      }
+  //     if (parentDof == -1) {
+  //       std::cout << "Found root: " << joint->getName() << std::endl;
+  //       break;
+  //     }
 
-      // iteration
-      joint = model.joints_[parentDof];
-      parentDof = joint->getParentDof();
-    }
-  }
+  //     // iteration
+  //     joint = model.joints_[parentDof];
+  //     parentDof = joint->getParentDof();
+  //   }
+  // }
+
+  algorithms::crba(model, data, gc);
+
+  std::cout << "mass matrix: " << std::endl;
 
   // // print all the positions with the name of joints
   // for (size_t i = 0; i < model.joints_.size(); i++) {

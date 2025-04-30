@@ -23,6 +23,11 @@ public:
   // jacobian
   Eigen::MatrixXd posJacobian;
   Eigen::MatrixXd rotJacobian;
+
+  // crba
+  std::vector<Transform> comW; // center of mass in world frame for each link
+  std::vector<Eigen::Matrix3d> inertiaW; // inertia in world frame for each link
+  Eigen::MatrixXd massMatrix;            // mass matrix
 };
 
 #endif // DATA_HPP
