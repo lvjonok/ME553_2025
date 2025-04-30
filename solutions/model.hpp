@@ -3,6 +3,7 @@
 
 #include <Eigen/Core>
 #include <cstddef>
+#include <eigen3/Eigen/src/Core/Matrix.h>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -46,16 +47,47 @@ class Link {
 public:
   Link(std::string name) : name(name) {}
 
+  Link(std::string name, Eigen::Vector3d origin, Eigen::Vector3d rpy,
+       double mass, Eigen::VectorXd inertiaFlat)
+      : name(name), _origin(origin), _rpy(rpy), _mass(mass) {
+    // inertiaFlat contains 6 values: ixx, ixy, ixz, iyy, iyz, izz
+    if (inertiaFlat.size() == 6) {
+      // clang-format off
+      _inertia << inertiaFlat(0), inertiaFlat(1), inertiaFlat(2),
+                  inertiaFlat(1), inertiaFlat(3), inertiaFlat(4),
+                  inertiaFlat(2), inertiaFlat(4), inertiaFlat(5);
+      // clang-format on
+    } else {
+      std::cerr << "Error: inertiaFlat must have 6 elements." << std::endl;
+    }
+  }
+
   std::string getName() const { return name; }
 
   void setIndex(int idx) { index = idx; }
 
   int getIndex() const { return index; }
 
+  double getMass() const { return _mass; }
+  Eigen::Matrix3d getInertia() const { return _inertia; }
+
+  Transform getTransform() const {
+    Transform T = Transform::Identity();
+    T.block<3, 3>(0, 0) = RotZ(_rpy[2]) * RotY(_rpy[1]) * RotX(_rpy[0]);
+    T.block<3, 1>(0, 3) = _origin;
+    return T;
+  }
+
 private:
   std::string name;
 
   int index;
+
+  Eigen::Vector3d _origin = Eigen::Vector3d::Zero();
+  Eigen::Vector3d _rpy = Eigen::Vector3d::Zero();
+
+  double _mass = 0.0;
+  Eigen::Matrix3d _inertia = Eigen::Matrix3d::Identity();
 };
 
 // Joint types
@@ -416,7 +448,62 @@ public:
 
   std::shared_ptr<Link> parseLink(const raisim::TiXmlElement &link) {
     auto linkName = link.Attribute("name");
-    return std::make_shared<Link>(linkName);
+    auto inertial = link.FirstChildElement("inertial");
+    assert(inertial != nullptr);
+
+    auto massEl = inertial->FirstChildElement("mass")->Attribute("value");
+    assert(massEl != nullptr);
+    auto inertiaEl = inertial->FirstChildElement("inertia");
+    assert(inertiaEl != nullptr);
+    auto originEl = inertial->FirstChildElement("origin");
+    assert(originEl != nullptr);
+
+    auto originXYZ = originEl->Attribute("xyz");
+    auto originRPY = originEl->Attribute("rpy");
+
+    // parse origin
+    Eigen::Vector3d origin = Eigen::Vector3d::Zero();
+    if (originXYZ != nullptr) {
+      std::stringstream ss(originXYZ);
+      ss >> origin[0] >> origin[1] >> origin[2];
+    }
+
+    // parse rpy
+    Eigen::Vector3d rpy = Eigen::Vector3d::Zero();
+    if (originRPY != nullptr) {
+      std::stringstream ss(originRPY);
+      ss >> rpy[0] >> rpy[1] >> rpy[2];
+    }
+
+    // parse inertia
+    auto inertiaXX = inertiaEl->Attribute("ixx");
+    auto inertiaXY = inertiaEl->Attribute("ixy");
+    auto inertiaXZ = inertiaEl->Attribute("ixz");
+    auto inertiaYY = inertiaEl->Attribute("iyy");
+    auto inertiaYZ = inertiaEl->Attribute("iyz");
+    auto inertiaZZ = inertiaEl->Attribute("izz");
+
+    // parse mass
+    double massValue = 0.0;
+    if (massEl != nullptr) {
+      std::stringstream ss(massEl);
+      ss >> massValue;
+    }
+
+    // parse inertia
+    Eigen::VectorXd inertiaFlat(6);
+    std::vector<const char *> inertiaAttrs = {inertiaXX, inertiaXY, inertiaXZ,
+                                              inertiaYY, inertiaYZ, inertiaZZ};
+    for (size_t i = 0; i < inertiaAttrs.size(); i++) {
+      if (inertiaAttrs[i] != nullptr) {
+        std::stringstream ss(inertiaAttrs[i]);
+        ss >> inertiaFlat[i];
+      }
+    }
+
+    return std::make_shared<Link>(std::string(linkName), origin, rpy, massValue,
+                                  inertiaFlat);
+    // return std::make_shared<Link>(linkName);
   }
 
   std::shared_ptr<Joint> parseJoint(const raisim::TiXmlElement &jointXML,

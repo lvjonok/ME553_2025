@@ -366,13 +366,22 @@ inline Eigen::MatrixXd getMassMatrix(const Eigen::VectorXd &gc) {
 
   algorithms::framesForwardKinematics(model, data, gc);
 
-  // print all the positions with the name of joints
-  for (size_t i = 0; i < model.joints_.size(); i++) {
-    auto joint = model.joints_[i];
-    std::cout << "joint name: " << joint->getName() << std::endl;
-    std::cout << "joint position: " << data.oTj[i].block<3, 1>(0, 3)
-              << std::endl;
-  }
+  // // find bodies CoM in the world frame
+  // for (size_t i = 0; i < model.links_.size(); i++) {
+  //   auto link = model.links_[i];
+  //   auto com = link->getTransform();
+  //   auto comW = data.oTb[i] * com;
+  //   std::cout << "body name: " << link->getName() << std::endl;
+  //   std::cout << "body com: " << comW << std::endl;
+  // }
+
+  // // print all the positions with the name of joints
+  // for (size_t i = 0; i < model.joints_.size(); i++) {
+  //   auto joint = model.joints_[i];
+  //   std::cout << "joint name: " << joint->getName() << std::endl;
+  //   std::cout << "joint position: " << data.oTj[i].block<3, 1>(0, 3)
+  //             << std::endl;
+  // }
 
   return Eigen::MatrixXd::Ones(18, 18);
 }
