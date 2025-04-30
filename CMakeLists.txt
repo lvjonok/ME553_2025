@@ -9,6 +9,7 @@ add_subdirectory(third_party/raisimLib)
 # exercise
 create_executable(exercise1 src/exercise1.cpp)
 create_executable(exercise2 src/exercise2.cpp)
+create_executable(exercise3 src/exercise3.cpp)
 
 # examples
 create_executable(rotation_example_angle_axis src/rotation_example_angle_axis.cpp)
