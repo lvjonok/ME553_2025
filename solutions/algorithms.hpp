@@ -31,7 +31,8 @@ inline void framesForwardKinematics(const Model &model, Data &data,
 
     // if joint is not fixed, apply the motion
     if (model.idx_qs_[i] != -1) {
-      Transform motion = joint->motion(gc[model.idx_qs_[i]]);
+      Transform motion =
+          joint->motion(gc, model.idx_qs_[i], joint->gc_length());
       jointFrame = jointFrame * motion;
     }
 
