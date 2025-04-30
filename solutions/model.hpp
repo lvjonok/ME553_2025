@@ -30,6 +30,18 @@ inline Eigen::Matrix3d RotZ(double theta) {
   return R;
 }
 
+inline Eigen::Matrix3d RotAxisAngle(const Eigen::Vector3d &axis, double angle) {
+  Eigen::Vector3d k = axis.normalized();
+  double c = std::cos(angle);
+  double s = std::sin(angle);
+  // skew‐symmetric cross‐product matrix of k
+  Eigen::Matrix3d K;
+  K << 0, -k.z(), k.y(), k.z(), 0, -k.x(), -k.y(), k.x(), 0;
+  // Rodrigues' rotation formula
+  return c * Eigen::Matrix3d::Identity() + (1 - c) * (k * k.transpose()) +
+         s * K;
+}
+
 class Link {
 public:
   Link(std::string name) : name(name) {}
@@ -47,7 +59,7 @@ private:
 };
 
 // Joint types
-enum class JointType { REVOLUTE, PRISMATIC, FIXED };
+enum class JointType { REVOLUTE, PRISMATIC, FIXED, FLOATING };
 
 class Joint {
 public:
@@ -77,7 +89,8 @@ public:
     Eigen::Matrix3d R;
     if (type_ == JointType::REVOLUTE) {
       // TODO: what if axis are not z?
-      R = RotZ(theta);
+      // R = RotZ(theta);
+      R = RotAxisAngle(axis, theta);
     } else if (type_ == JointType::PRISMATIC) {
       R = Eigen::Matrix3d::Identity();
     } else {
@@ -98,23 +111,31 @@ public:
   }
 
   int gc_length() {
-    return 1;
+    // return 1;
     if (type_ == JointType::FIXED) {
       return 0;
-    } else {
+    } else if (type_ == JointType::FLOATING) {
+      return 7;
+    } else if (type_ == JointType::REVOLUTE) {
       return 1;
     }
+
+    return 1;
   }
 
   int gc_start_idx() { return this->gc_start_idx_; }
 
   int gv_length() {
-    return 1;
+    // return 1;
     if (type_ == JointType::FIXED) {
       return 0;
-    } else {
+    } else if (type_ == JointType::FLOATING) {
+      return 6;
+    } else if (type_ == JointType::REVOLUTE) {
       return 1;
     }
+
+    return 1;
   }
 
   int gv_start_idx() { return gv_start_idx_; }
@@ -178,10 +199,23 @@ public:
 
     // now we have to register the whole structure
     // first body should be the world
-    auto world = links_[0];
-    assert(world->getName() == "world");
 
-    addLink(world);
+    // TODO: for mini cheetah the base link is BODY and there is no world
+    auto worldLink = std::make_shared<Link>("world");
+    std::cout << "worldLink: " << worldLink->getName() << std::endl;
+    auto floatingJoint = std::make_shared<Joint>(
+        worldLink, links_[0], Eigen::Vector3d(0, 0, 0),
+        Eigen::Vector3d(0, 0, 0), Eigen::Vector3d(0, 0, 0), JointType::FLOATING,
+        "floating");
+
+    // put worldLink in front of the list
+    links_.insert(links_.begin(), worldLink);
+    joints_.insert(joints_.begin(), floatingJoint);
+
+    // assert(world->getName() == "world");
+    _world_name = "world";
+
+    addLink(worldLink);
 
     // now each link and joint has index, let's construct vectors
     // with the correct indices
@@ -230,7 +264,7 @@ public:
               << " with index " << joint->getIndex() << std::endl;
 
     auto iterJoint = joint;
-    while (iterJoint->parent->getName() != "world") {
+    while (iterJoint->parent->getName() != _world_name) {
 
       bool foundActuatedParent = false;
 
@@ -249,7 +283,7 @@ public:
         //           << std::endl;
 
         // if we are at the world, we should break
-        if (iterJoint->parent->getName() == "world") {
+        if (iterJoint->parent->getName() == _world_name) {
           break;
         }
 
@@ -431,6 +465,8 @@ public:
   // velocity source
   int dof_;
   std::vector<int> dof_parent;
+
+  std::string _world_name = "world";
 };
 
 #endif

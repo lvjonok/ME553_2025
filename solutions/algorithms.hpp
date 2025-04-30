@@ -354,4 +354,26 @@ inline Eigen::Vector3d getAngularVelocity(const Eigen::VectorXd &gc,
   return Eigen::Vector3d::Ones(); /// replace this
 }
 
+/// do not change the name of the method
+inline Eigen::MatrixXd getMassMatrix(const Eigen::VectorXd &gc) {
+
+  /// !!!!!!!!!! NO RAISIM FUNCTIONS HERE !!!!!!!!!!!!!!!!!
+
+  Model model("/home/lvjonok/github.com/lvjonok/ME553_2025/resource/"
+              "mini_cheetah/urdf/cheetah.urdf");
+  Data data(model);
+
+  algorithms::framesForwardKinematics(model, data, gc);
+
+  // print all the positions with the name of joints
+  for (size_t i = 0; i < model.joints_.size(); i++) {
+    auto joint = model.joints_[i];
+    std::cout << "joint name: " << joint->getName() << std::endl;
+    std::cout << "joint position: " << data.oTj[i].block<3, 1>(0, 3)
+              << std::endl;
+  }
+
+  return Eigen::MatrixXd::Ones(18, 18);
+}
+
 #endif
