@@ -387,6 +387,38 @@ inline Eigen::MatrixXd getMassMatrix(const Eigen::VectorXd &gc) {
   //   std::cout << "body inertia: " << worldInertia << std::endl;
   // }
 
+  // iterate from leaves towards the root
+  // first, find the leaves
+  std::vector<std::shared_ptr<Joint>> leaves;
+  std::cout << "leaves: " << std::endl;
+  for (auto joint : model.leaves_) {
+    std::cout << "joint name: " << joint->getName() << std::endl;
+  }
+
+  // now starting from each leaf, go up to the root
+  for (auto leaf : model.leaves_) {
+    std::cout << "Starting from leaf: " << leaf->getName() << std::endl;
+
+    // iterate upwards
+    auto joint = leaf;
+    auto parentDof = joint->getParentDof();
+    while (true) {
+      auto columnIdx = model.idx_vs_[joint->getIndex()];
+      std::cout << "joint name: " << joint->getName()
+                << " parentdof: " << joint->getParentDof()
+                << " column: " << columnIdx << std::endl;
+
+      if (parentDof == -1) {
+        std::cout << "Found root: " << joint->getName() << std::endl;
+        break;
+      }
+
+      // iteration
+      joint = model.joints_[parentDof];
+      parentDof = joint->getParentDof();
+    }
+  }
+
   // // print all the positions with the name of joints
   // for (size_t i = 0; i < model.joints_.size(); i++) {
   //   auto joint = model.joints_[i];

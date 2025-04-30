@@ -284,18 +284,23 @@ public:
 
     // assert(world->getName() == "world");
     _world_name = "world";
-
+    // auto worldLink = links_[0];
     addLink(worldLink);
 
-    // now each link and joint has index, let's construct vectors
-    // with the correct indices
-    sortedLinks.resize(links_.size());
-    sortedJoints.resize(joints_.size());
-    for (auto link : links_) {
-      sortedLinks[link->getIndex()] = link;
-    }
+    // we have parsed everything, now we can set parent dofs for joints for
+    // easier traversal
     for (auto joint : joints_) {
-      sortedJoints[joint->getIndex()] = joint;
+      auto parentLink = joint->parent;
+      auto parentJoint = linkUpward(parentLink);
+
+      if (parentJoint != nullptr) {
+        joint->setParentDof(parentJoint->getIndex());
+      } else {
+        joint->setParentDof(-1);
+      }
+
+      // std::cout << "joint name: " << joint->getName()
+      //           << " parentDof: " << joint->getParentDof() << std::endl;
     }
   }
 
@@ -308,10 +313,18 @@ public:
     link->setIndex(nbodies_);
     nbodies_++;
 
+    auto no_joints = true;
     for (auto joint : joints_) {
       if (joint->parent == link) {
+        no_joints = false;
         addJoint(joint, link->getIndex());
       }
+    }
+
+    if (no_joints) {
+      // if there are no joints, jointIdx points towards the leaf joint
+      // we should add the link to the list of joints
+      leaves_.push_back(joints_[jointIdx]);
     }
   }
 
@@ -327,59 +340,6 @@ public:
     childIdxs.push_back(joint->child->getIndex());
     jointNames.push_back(joint->getName());
     linkNames.push_back(joint->parent->getName());
-
-    // right now we have to find out, which actuated joint is the parent of this
-    auto parentDof = -1;
-    std::cout << "Looking for parentDof for joint " << joint->getName()
-              << " with index " << joint->getIndex() << std::endl;
-
-    auto iterJoint = joint;
-    while (iterJoint->parent->getName() != _world_name) {
-
-      bool foundActuatedParent = false;
-
-      while (!foundActuatedParent) {
-        auto parentLink = iterJoint->parent;
-        // find for which joint the parent link is the child
-        for (auto j : joints_) {
-          if (j->child == parentLink) {
-            iterJoint = j;
-            break;
-          }
-        }
-
-        // std::cout << "iterJoint: " << iterJoint->getName()
-        //           << " parentName: " << iterJoint->parent->getName()
-        //           << std::endl;
-
-        // if we are at the world, we should break
-        if (iterJoint->parent->getName() == _world_name) {
-          break;
-        }
-
-        // if we found the actuated joint, we can break
-        if (iterJoint->getType() != JointType::FIXED) {
-          foundActuatedParent = true;
-          parentDof = iterJoint->getIndex();
-          break;
-        }
-      }
-
-      // Set the parentDof for the joint
-      joint->setParentDof(parentDof);
-      std::cout << "Found parentDof: " << parentDof << std::endl;
-      break;
-    }
-
-    // // right now we have to find joint for which we are the child
-    // auto parentDof = -1;
-    // for (auto j : joints_) {
-    //   if (j->child == joint->parent) {
-    //     parentDof = j->getIndex();
-    //     break;
-    //   }
-    // }
-    // joint->setParentDof(parentDof);
 
     if (joint->getType() == JointType::FIXED) {
       // if the joint is fixed, we should not add any generalized coordinates
@@ -400,6 +360,20 @@ public:
 
     // now we have to add a child of this link
     addLink(joint->child, joint->getIndex());
+  }
+
+  std::shared_ptr<Joint> linkUpward(std::shared_ptr<Link> link) {
+    // this function finds the joint where the link is the child of the joint
+    // and returns the joint
+    for (auto joint : joints_) {
+      if (joint->child == link) {
+        return joint;
+      }
+    }
+
+    std::cerr << "Link " << link->getName() << " is not a child of any joint."
+              << std::endl;
+    return nullptr;
   }
 
   void parseURDF(const raisim::TiXmlDocument &urdf) {
@@ -448,6 +422,7 @@ public:
 
   std::shared_ptr<Link> parseLink(const raisim::TiXmlElement &link) {
     auto linkName = link.Attribute("name");
+    // return std::make_shared<Link>(linkName);
     auto inertial = link.FirstChildElement("inertial");
     assert(inertial != nullptr);
 
@@ -592,6 +567,8 @@ public:
   std::vector<int> dof_parent;
 
   std::string _world_name = "world";
+  // those joints are the leaves of kinematic tree
+  std::vector<std::shared_ptr<Joint>> leaves_;
 };
 
 #endif
