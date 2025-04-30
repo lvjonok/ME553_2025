@@ -375,6 +375,18 @@ inline Eigen::MatrixXd getMassMatrix(const Eigen::VectorXd &gc) {
   //   std::cout << "body com: " << comW << std::endl;
   // }
 
+  // // find bodies Inertia expressed in the world frame
+  // for (size_t i = 0; i < model.links_.size(); i++) {
+  //   auto link = model.links_[i];
+  //   auto inertia = link->getInertia();
+
+  //   auto worldInertia = data.oTb[i].block<3, 3>(0, 0) * inertia *
+  //                       data.oTb[i].block<3, 3>(0, 0).transpose();
+
+  //   std::cout << "body name: " << link->getName() << std::endl;
+  //   std::cout << "body inertia: " << worldInertia << std::endl;
+  // }
+
   // // print all the positions with the name of joints
   // for (size_t i = 0; i < model.joints_.size(); i++) {
   //   auto joint = model.joints_[i];
