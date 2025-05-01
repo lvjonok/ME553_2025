@@ -87,7 +87,7 @@ private:
   Eigen::Vector3d _rpy = Eigen::Vector3d::Zero();
 
   double _mass = 0.0;
-  Eigen::Matrix3d _inertia = Eigen::Matrix3d::Identity();
+  Eigen::Matrix3d _inertia = Eigen::Matrix3d::Zero();
 };
 
 // Joint types

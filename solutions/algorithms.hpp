@@ -229,9 +229,6 @@ inline void inertiaUpdate(const Model &model, Data &data,
     Transform comW = data.oTb[i] * com;
 
     data.comW[i] = comW; //.block<3, 1>(0, 3);
-
-    std::cout << "body name: " << link->getName() << std::endl;
-    std::cout << "body inertia: " << worldInertia << std::endl;
   }
 
   // now we compute the composite inertia of each body
@@ -257,10 +254,6 @@ inline void inertiaUpdate(const Model &model, Data &data,
     Eigen::Vector3d com = data.comW[i].block<3, 1>(0, 3);
 
     auto mass = link->getMass();
-
-    // std::cout << "com of index " << i << ": " << com.transpose() <<
-    // std::endl;
-    std::cout << "link mass of index " << i << ": " << mass << std::endl;
 
     data.compositeMassW[i] = mass;
     data.compositeComW[i] = com;
@@ -289,13 +282,14 @@ inline void inertiaUpdate(const Model &model, Data &data,
       data.compositeInertiaW[i] = I_new;
     }
 
-    std::cout << "updated composite mass of index " << i << ": "
-              << data.compositeMassW[i] << std::endl;
-    std::cout << "updated composite com of index " << i << ": "
-              << data.compositeComW[i].transpose() << std::endl;
+    // std::cout << "updated composite mass of index " << i << ": "
+    //           << data.compositeMassW[i] << std::endl;
+    // std::cout << "updated composite com of index " << i << ": "
+    //           << data.compositeComW[i].transpose() << std::endl;
 
-    std::cout << "updated composite inertia of index " << i << ": " << std::endl
-              << data.compositeInertiaW[i] << std::endl;
+    // std::cout << "updated composite inertia of index " << i << ": " <<
+    // std::endl
+    //           << data.compositeInertiaW[i] << std::endl;
   }
 
   Eigen::Vector3d d = data.compositeComW[1];
@@ -304,9 +298,12 @@ inline void inertiaUpdate(const Model &model, Data &data,
       data.compositeMassW[1] *
           (d.squaredNorm() * Eigen::Matrix3d::Identity() - d * d.transpose());
 
-  std::cout << "updated composite inertia about origin of index " << 1 << ": "
-            << std::endl
-            << I_aboutOrigin << std::endl;
+  data.compositeInertiaW[1] = I_aboutOrigin;
+
+  // std::cout << "updated composite inertia about origin of index " << 1 << ":
+  // "
+  //           << std::endl
+  //           << I_aboutOrigin << std::endl;
 }
 
 inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
