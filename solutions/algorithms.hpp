@@ -5,6 +5,7 @@
 #include "model.hpp"
 #include <Eigen/Core>
 #include <cstddef>
+#include <eigen3/Eigen/src/Core/Matrix.h>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -224,8 +225,8 @@ inline void inertiaUpdate(const Model &model, Data &data,
     data.inertiaW[i] = worldInertia;
 
     // find the center of mass in the world frame
-    auto com = link->getTransform();
-    auto comW = data.oTb[i] * com;
+    Transform com = link->getTransform();
+    Transform comW = data.oTb[i] * com;
 
     data.comW[i] = comW; //.block<3, 1>(0, 3);
 
@@ -251,98 +252,10 @@ inline void inertiaUpdate(const Model &model, Data &data,
     return skew;
   };
 
-  // auto unskew = [](const Eigen::Matrix3d &skew) {
-  //   Eigen::Vector3d v;
-  //   v(0) = skew(2, 1);
-  //   v(1) = skew(0, 2);
-  //   v(2) = skew(1, 0);
-  //   return v;
-  // };
-
-  // auto link2spatialInertia = [skew](const Eigen::Matrix3d &inertia,
-  //                                   const Eigen::Vector3d &com, double mass)
-  //                                   {
-  //   Eigen::MatrixXd spatialInertia(6, 6);
-  //   spatialInertia.setZero();
-
-  //   Eigen::Matrix3d comSkew = skew(com);
-
-  //   spatialInertia.block<3, 3>(0, 0) = mass * Eigen::Matrix3d::Identity();
-  //   spatialInertia.block<3, 3>(3, 3) = inertia;
-  //   spatialInertia.block<3, 3>(0, 3) = -mass * comSkew;
-  //   spatialInertia.block<3, 3>(3, 0) = mass * comSkew.transpose();
-
-  //   return spatialInertia;
-  // };
-
-  // auto spatialTransform = [skew](Transform t) {
-  //   Eigen::MatrixXd spatialTransform(6, 6);
-  //   spatialTransform.setZero();
-
-  //   Eigen::Matrix3d R = t.block<3, 3>(0, 0);
-  //   Eigen::Vector3d p = t.block<3, 1>(0, 3);
-
-  //   spatialTransform.block<3, 3>(0, 0) = R;
-  //   spatialTransform.block<3, 3>(3, 3) = R;
-  //   spatialTransform.block<3, 3>(0, 3) = -skew(R * p);
-
-  //   return spatialTransform;
-  // };
-
-  // for (int i = model.links_.size() - 1; i >= 0; i--) {
-  //   auto link = model.links_[i];
-  //   auto inertia = data.inertiaW[i];
-  //   auto com = data.comW[i].block<3, 1>(0, 3);
-  //   auto mass = link->getMass();
-  //   auto Ic = link2spatialInertia(inertia, com, mass);
-
-  //   data.compositeSpatialInertiaW[i] = Ic;
-
-  //   // iterate children and add their inertia
-  //   for (auto childJoint : model.getAttachedJoints(link)) {
-  //     auto childLink = childJoint->child;
-
-  //     // find a transformation from i-th link to child link
-  //     auto childTransform = data.oTb[childLink->getIndex()];
-  //     auto transform = childTransform.inverse() * data.oTb[i];
-
-  //     // find the spatial inertia of the child link
-  //     auto spatial = spatialTransform(transform);
-
-  //     data.compositeSpatialInertiaW[i] +=
-  //         spatial.transpose() *
-  //         data.compositeSpatialInertiaW[childLink->getIndex()] * spatial;
-  //   }
-
-  //   // take out the mass
-  //   auto compositeMass = data.compositeSpatialInertiaW[i](0, 0);
-
-  //   // unskew m * com
-  //   auto comSkew = data.compositeSpatialInertiaW[i].block<3, 3>(3, 0);
-  //   Eigen::Vector3d compCom = -unskew(comSkew);
-  //   compCom /= compositeMass;
-
-  //   // get the inertia of the composite
-  //   auto inertiaComposite = data.compositeSpatialInertiaW[i].block<3, 3>(3,
-  //   3);
-
-  //   std::cout << "composite mass of index " << i << ": " << compositeMass
-  //             << std::endl;
-
-  //   std::cout << "composite com of index " << i << ": " <<
-  //   compCom.transpose()
-  //             << std::endl;
-
-  //   std::cout << "composite inertia of index " << i << ": " <<
-  //   inertiaComposite
-  //             << std::endl;
-  // }
-
   for (int i = model.links_.size() - 1; i >= 1; i--) {
     auto link = model.links_[i];
-    auto inertia = data.inertiaW[i];
+    Eigen::Vector3d com = data.comW[i].block<3, 1>(0, 3);
 
-    auto com = data.comW[i].block<3, 1>(0, 3);
     auto mass = link->getMass();
 
     // std::cout << "com of index " << i << ": " << com.transpose() <<
@@ -351,7 +264,7 @@ inline void inertiaUpdate(const Model &model, Data &data,
 
     data.compositeMassW[i] = mass;
     data.compositeComW[i] = com;
-    data.compositeInertiaW[i] = inertia;
+    data.compositeInertiaW[i] = data.inertiaW[i];
 
     for (auto childJoint : model.getAttachedJoints(link)) {
       Eigen::Vector3d c1 = data.compositeComW[i];
@@ -364,39 +277,36 @@ inline void inertiaUpdate(const Model &model, Data &data,
       auto m2 = data.compositeMassW[childIdx];
       Eigen::Matrix3d I2 = data.compositeInertiaW[childIdx];
 
-      auto r_com_new = (m1 * c1 + m2 * c2) / (m1 + m2);
-      auto r1 = c1 - r_com_new;
-      auto r2 = c2 - r_com_new;
+      Eigen::Vector3d r_com_new = (m1 * c1 + m2 * c2) / (m1 + m2);
+      Eigen::Vector3d r1 = c1 - r_com_new;
+      Eigen::Vector3d r2 = c2 - r_com_new;
 
       Eigen::Matrix3d I_new =
           I1 + I2 - m1 * skew(r1) * skew(r1) - m2 * skew(r2) * skew(r2);
 
-      data.compositeMassW[i] += m2;
+      data.compositeMassW[i] = m1 + m2;
       data.compositeComW[i] = r_com_new;
       data.compositeInertiaW[i] = I_new;
-
-      std::cout << "updated composite inertia of index " << i << ": "
-                << std::endl
-                << data.compositeInertiaW[i] << std::endl;
     }
-
-    // // if this is a leaf, we just copy its mass as composite mass
-    // if (model.isLeaf(link)) {
-    //   data.compositeMassW[i] = mass;
-    //   data.compositeComW[i] = com;
-    //   data.compositeInertiaW[i] = inertia;
-    // } else {
-    //   // otherwise, we have to use children masses
-
-    // }
 
     std::cout << "updated composite mass of index " << i << ": "
               << data.compositeMassW[i] << std::endl;
     std::cout << "updated composite com of index " << i << ": "
               << data.compositeComW[i].transpose() << std::endl;
+
     std::cout << "updated composite inertia of index " << i << ": " << std::endl
               << data.compositeInertiaW[i] << std::endl;
   }
+
+  Eigen::Vector3d d = data.compositeComW[1];
+  Eigen::Matrix3d I_aboutOrigin =
+      data.compositeInertiaW[1] +
+      data.compositeMassW[1] *
+          (d.squaredNorm() * Eigen::Matrix3d::Identity() - d * d.transpose());
+
+  std::cout << "updated composite inertia about origin of index " << 1 << ": "
+            << std::endl
+            << I_aboutOrigin << std::endl;
 }
 
 inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
