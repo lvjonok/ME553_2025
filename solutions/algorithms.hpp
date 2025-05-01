@@ -232,6 +232,52 @@ inline void inertiaUpdate(const Model &model, Data &data,
     std::cout << "body name: " << link->getName() << std::endl;
     std::cout << "body inertia: " << worldInertia << std::endl;
   }
+
+  // now we compute the composite inertia of each body
+  data.compositeInertiaW.resize(model.links_.size());
+  data.compositeMassW.resize(model.links_.size());
+  data.compositeComW.resize(model.links_.size());
+
+  for (int i = model.links_.size() - 1; i >= 0; i--) {
+    auto link = model.links_[i];
+    auto inertia = data.inertiaW[i];
+
+    auto com = data.comW[i];
+    auto mass = link->getMass();
+
+    // std::cout << "com of index " << i << ": " << com.transpose() <<
+    // std::endl;
+    std::cout << "link mass of index " << i << ": " << mass << std::endl;
+
+    // if this is a leaf, we just copy its mass as composite mass
+    if (model.isLeaf(link)) {
+      data.compositeMassW[i] = mass;
+      data.compositeComW[i] = com;
+      data.compositeInertiaW[i] = inertia;
+    } else {
+      // otherwise, we have to use children masses
+      data.compositeMassW[i] = mass;
+      data.compositeComW[i] = com * mass;
+      data.compositeInertiaW[i] = inertia;
+
+      for (auto childJoint : model.getAttachedJoints(link)) {
+        auto childLink = childJoint->child;
+        data.compositeMassW[i] += data.compositeMassW[childLink->getIndex()];
+        data.compositeComW[i] += data.compositeComW[childLink->getIndex()] *
+                                 data.compositeMassW[childLink->getIndex()];
+      }
+
+      data.compositeComW[i] /= data.compositeMassW[i];
+    }
+
+    std::cout << "updated composite mass of index " << i << ": "
+              << data.compositeMassW[i] << std::endl;
+    std::cout << "updated composite com of index " << i << ": "
+              << data.compositeComW[i].block<3, 1>(0, 3).transpose()
+              << std::endl;
+    // std::cout << "updated composite inertia of index " << std::endl;
+    // std::cout << data.compositeInertiaW[i] << std::endl;
+  }
 }
 
 inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
@@ -241,34 +287,34 @@ inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
   // update the inertia of each link to be in the world frame
   inertiaUpdate(model, data, gc);
 
-  // iterate from each joint upwards the kinematic chain
-  for (int i = model.joints_.size() - 1; i >= 0; i--) {
-    auto joint = model.joints_[i];
-    auto columnI = model.idx_vs_[joint->getIndex()];
+  // // iterate from each joint upwards the kinematic chain
+  // for (int i = model.joints_.size() - 1; i >= 0; i--) {
+  //   auto joint = model.joints_[i];
+  //   auto columnI = model.idx_vs_[joint->getIndex()];
 
-    // now iterate updwards the kinematic chain from i-th joint
-    auto parentDof = joint->getParentDof();
-    auto jointJ = joint;
-    while (true) {
-      auto columnJ = model.idx_vs_[jointJ->getIndex()];
-      // std::cout << "joint name: " << jointJ->getName()
-      //           << " parentdof: " << jointJ->getParentDof()
-      //           << " column: " << columnIdx << std::endl;
+  //   // now iterate updwards the kinematic chain from i-th joint
+  //   auto parentDof = joint->getParentDof();
+  //   auto jointJ = joint;
+  //   while (true) {
+  //     auto columnJ = model.idx_vs_[jointJ->getIndex()];
+  //     // std::cout << "joint name: " << jointJ->getName()
+  //     //           << " parentdof: " << jointJ->getParentDof()
+  //     //           << " column: " << columnIdx << std::endl;
 
-      std::cout << "M_" << columnI << "," << columnJ << " = " << parentDof
-                << std::endl;
+  //     std::cout << "M_" << columnI << "," << columnJ << " = " << parentDof
+  //               << std::endl;
 
-      if (parentDof == -1) {
-        // std::cout << "Found root: " << jointJ->getName() << std::endl;
-        // std::cout << "check" << std::endl;
-        break;
-      }
+  //     if (parentDof == -1) {
+  //       // std::cout << "Found root: " << jointJ->getName() << std::endl;
+  //       // std::cout << "check" << std::endl;
+  //       break;
+  //     }
 
-      // iteration
-      jointJ = model.joints_[parentDof];
-      parentDof = jointJ->getParentDof();
-    }
-  }
+  //     // iteration
+  //     jointJ = model.joints_[parentDof];
+  //     parentDof = jointJ->getParentDof();
+  //   }
+  // }
 }
 
 }; // namespace algorithms

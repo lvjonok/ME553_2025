@@ -362,7 +362,7 @@ public:
     addLink(joint->child, joint->getIndex());
   }
 
-  std::shared_ptr<Joint> linkUpward(std::shared_ptr<Link> link) {
+  std::shared_ptr<Joint> linkUpward(std::shared_ptr<Link> link) const {
     // this function finds the joint where the link is the child of the joint
     // and returns the joint
     for (auto joint : joints_) {
@@ -374,6 +374,30 @@ public:
     std::cerr << "Link " << link->getName() << " is not a child of any joint."
               << std::endl;
     return nullptr;
+  }
+
+  bool isLeaf(std::shared_ptr<Link> link) const {
+    // this function checks if the link is a leaf
+    for (auto joint : joints_) {
+      if (joint->parent == link) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  std::vector<std::shared_ptr<Joint>>
+  getAttachedJoints(std::shared_ptr<Link> link) const {
+    // this function returns all the joints that are attached to the link
+    std::vector<std::shared_ptr<Joint>> attachedJoints;
+    for (auto joint : joints_) {
+      if (joint->parent == link) {
+        attachedJoints.push_back(joint);
+      }
+    }
+
+    return attachedJoints;
   }
 
   void parseURDF(const raisim::TiXmlDocument &urdf) {

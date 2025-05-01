@@ -27,7 +27,14 @@ public:
   // crba
   std::vector<Transform> comW; // center of mass in world frame for each link
   std::vector<Eigen::Matrix3d> inertiaW; // inertia in world frame for each link
-  Eigen::MatrixXd massMatrix;            // mass matrix
+
+  // composite inertia in world frame of each subtree rooted at the link
+  std::vector<Eigen::Matrix3d> compositeInertiaW;
+  std::vector<double> compositeMassW; // mass of each subtree rooted at the link
+  std::vector<Transform>
+      compositeComW; // com of each subtree rooted at the link
+
+  Eigen::MatrixXd massMatrix; // mass matrix
 };
 
 #endif // DATA_HPP
