@@ -35,7 +35,8 @@ public:
       compositeComW; // com of each subtree rooted at the link
 
   // composite inertia in world frame of each subtree rooted at the link
-  std::vector<Eigen::MatrixXd> compositeSpatialInertiaW;
+  std::vector<Eigen::MatrixXd> compositeSpatialInertia6;
+  std::vector<Eigen::Matrix<double, 6, 1>> S_W;
 
   Eigen::MatrixXd massMatrix; // mass matrix
 };

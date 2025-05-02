@@ -260,145 +260,219 @@ public:
     parseURDF(urdf);
     // at this points we only filled the links and joints
 
-    nq_ = 0;
-    nv_ = 0;
-    nbodies_ = 0;
-    nframes_ = 0;
-    njoints_ = 0;
-    dof_ = -1;
+    nbodies_ = links_.size();
+    X_T.resize(nbodies_);
+    parents.resize(0);
 
-    // now we have to register the whole structure
-    // first body should be the world
-
-    // TODO: for mini cheetah the base link is BODY and there is no world
-    auto worldLink = std::make_shared<Link>("world");
-    std::cout << "worldLink: " << worldLink->getName() << std::endl;
-    auto floatingJoint = std::make_shared<Joint>(
-        worldLink, links_[0], Eigen::Vector3d(0, 0, 0),
-        Eigen::Vector3d(0, 0, 0), Eigen::Vector3d(0, 0, 0), JointType::FLOATING,
-        "floating");
-
-    // put worldLink in front of the list
-    links_.insert(links_.begin(), worldLink);
-    joints_.insert(joints_.begin(), floatingJoint);
-
-    // assert(world->getName() == "world");
-    _world_name = "world";
-    // auto worldLink = links_[0];
-    addLink(worldLink);
-
-    // we have parsed everything, now we can set parent dofs for joints for
-    // easier traversal
-    for (auto joint : joints_) {
-      auto parentLink = joint->parent;
-      auto parentJoint = linkUpward(parentLink);
-
-      if (parentJoint != nullptr) {
-        joint->setParentDof(parentJoint->getIndex());
-      } else {
-        joint->setParentDof(-1);
+    // now with the parent array
+    // first, find the link that is not a child of any joint
+    // this is the root link
+    std::shared_ptr<Link> rootLink = nullptr;
+    {
+      for (auto link : links_) {
+        bool isChild = false;
+        for (auto joint : joints_) {
+          if (joint->child == link) {
+            isChild = true;
+            break;
+          }
+        }
+        if (!isChild) {
+          rootLink = link;
+          break;
+        }
       }
-
-      // std::cout << "joint name: " << joint->getName()
-      //           << " parentDof: " << joint->getParentDof() << std::endl;
     }
+
+    if (rootLink == nullptr) {
+      std::cerr << "Error: no root link found." << std::endl;
+      return;
+    }
+
+    std::cout << "root link: " << rootLink->getName() << std::endl;
+    // now we can traverse the children and fill the parent array
+    // parents.push_back(-1);
+    // rootLink->setIndex(0);
+    addLink(rootLink, -1);
   }
 
-  void addLink(std::shared_ptr<Link> link, int jointIdx = -1) {
-    // this function should be called to instantiate the structures and append a
-    // new body
+  void addLink(std::shared_ptr<Link> link, int parentIdx,
+               bool isFixed = false) {
+    // this function should be called to instantiate the structures and
+    // append a new body
 
-    // we have to find all the children (joints which have this link as a
-    // parent) and call add these joints
-    link->setIndex(nbodies_);
-    nbodies_++;
+    if (!isFixed) {
+      link->setIndex(parents.size());
+      parents.push_back(parentIdx);
+    }
 
-    auto no_joints = true;
+    // find the joints for which this link is a parent
     for (auto joint : joints_) {
-      if (joint->parent == link) {
-        no_joints = false;
+      if (joint->parent != link) {
+        continue;
+      }
+
+      // this joint is attached to this link
+      // we have to traverse the structure
+      joint->setIndex(link->getIndex());
+      if (isFixed) {
+        addJoint(joint, parentIdx);
+      } else {
         addJoint(joint, link->getIndex());
       }
     }
-
-    if (no_joints) {
-      // if there are no joints, jointIdx points towards the leaf joint
-      // we should add the link to the list of joints
-      leaves_.push_back(joints_[jointIdx]);
-    }
   }
 
-  void addJoint(std::shared_ptr<Joint> joint, size_t parentId) {
-    // this function should be called to instantiate the structures and append a
-    // new joint
+  void addJoint(std::shared_ptr<Joint> joint, int parentIdx) {
+    // this function should be called to instantiate the structures and
+    // append a new joint
 
-    joint->setIndex(njoints_);
-    njoints_++;
-
-    // parent id is an index of the parent link we have added
-    parentIdxs.push_back(parentId);
-    childIdxs.push_back(joint->child->getIndex());
-    jointNames.push_back(joint->getName());
-    linkNames.push_back(joint->parent->getName());
-
-    if (joint->getType() == JointType::FIXED) {
-      // if the joint is fixed, we should not add any generalized coordinates
-      // and velocities
-      idx_qs_.push_back(-1);
-      nqs_.push_back(-1);
-      idx_vs_.push_back(-1);
-      nvs_.push_back(-1);
-    } else {
-      idx_qs_.push_back(nq_);
-      nqs_.push_back(joint->gc_length());
-      idx_vs_.push_back(nv_);
-      nvs_.push_back(joint->gv_length());
-      // we should shift accordingly
-      nq_ += joint->gc_length();
-      nv_ += joint->gv_length();
-    }
-
-    // now we have to add a child of this link
-    addLink(joint->child, joint->getIndex());
+    // as we optimize fixed joints, we should indicate whether the next link is
+    // connected through a fixed joint
+    addLink(joint->child, parentIdx, joint->getType() == JointType::FIXED);
   }
 
-  std::shared_ptr<Joint> linkUpward(std::shared_ptr<Link> link) const {
-    // this function finds the joint where the link is the child of the joint
-    // and returns the joint
-    for (auto joint : joints_) {
-      if (joint->child == link) {
-        return joint;
-      }
-    }
+  // nq_ = 0;
+  // nv_ = 0;
+  // nbodies_ = 0;
+  // nframes_ = 0;
+  // njoints_ = 0;
+  // dof_ = -1;
 
-    std::cerr << "Link " << link->getName() << " is not a child of any joint."
-              << std::endl;
-    return nullptr;
-  }
+  // // now we have to register the whole structure
+  // // first body should be the world
 
-  bool isLeaf(std::shared_ptr<Link> link) const {
-    // this function checks if the link is a leaf
-    for (auto joint : joints_) {
-      if (joint->parent == link) {
-        return false;
-      }
-    }
+  // // TODO: for mini cheetah the base link is BODY and there is no world
+  // auto worldLink = std::make_shared<Link>("world");
+  // std::cout << "worldLink: " << worldLink->getName() << std::endl;
+  // auto floatingJoint = std::make_shared<Joint>(
+  //     worldLink, links_[0], Eigen::Vector3d(0, 0, 0),
+  //     Eigen::Vector3d(0, 0, 0), Eigen::Vector3d(0, 0, 0),
+  //     JointType::FLOATING, "floating");
 
-    return true;
-  }
+  // // put worldLink in front of the list
+  // links_.insert(links_.begin(), worldLink);
+  // joints_.insert(joints_.begin(), floatingJoint);
 
-  std::vector<std::shared_ptr<Joint>>
-  getAttachedJoints(std::shared_ptr<Link> link) const {
-    // this function returns all the joints that are attached to the link
-    std::vector<std::shared_ptr<Joint>> attachedJoints;
-    for (auto joint : joints_) {
-      if (joint->parent == link) {
-        attachedJoints.push_back(joint);
-      }
-    }
+  // // assert(world->getName() == "world");
+  // _world_name = "world";
+  // // auto worldLink = links_[0];
+  // addLink(worldLink);
 
-    return attachedJoints;
-  }
+  // // we have parsed everything, now we can set parent dofs for joints for
+  // // easier traversal
+  // for (auto joint : joints_) {
+  //   auto parentLink = joint->parent;
+  //   auto parentJoint = linkUpward(parentLink);
+
+  //   if (parentJoint != nullptr) {
+  //     joint->setParentDof(parentJoint->getIndex());
+  //   } else {
+  //     joint->setParentDof(-1);
+  //   }
+
+  //   // std::cout << "joint name: " << joint->getName()
+  //   //           << " parentDof: " << joint->getParentDof() << std::endl;
+  // }
+
+  // void addLink(std::shared_ptr<Link> link, int jointIdx = -1) {
+  //   // this function should be called to instantiate the structures and
+  //   append a
+  //   // new body
+
+  //   // we have to find all the children (joints which have this link as a
+  //   // parent) and call add these joints
+  //   link->setIndex(nbodies_);
+  //   nbodies_++;
+
+  //   auto no_joints = true;
+  //   for (auto joint : joints_) {
+  //     if (joint->parent == link) {
+  //       no_joints = false;
+  //       addJoint(joint, link->getIndex());
+  //     }
+  //   }
+
+  //   if (no_joints) {
+  //     // if there are no joints, jointIdx points towards the leaf joint
+  //     // we should add the link to the list of joints
+  //     leaves_.push_back(joints_[jointIdx]);
+  //   }
+  // }
+
+  // void addJoint(std::shared_ptr<Joint> joint, size_t parentId) {
+  //   // this function should be called to instantiate the structures and
+  //   append a
+  //   // new joint
+
+  //   joint->setIndex(njoints_);
+  //   njoints_++;
+
+  //   // parent id is an index of the parent link we have added
+  //   parentIdxs.push_back(parentId);
+  //   childIdxs.push_back(joint->child->getIndex());
+  //   jointNames.push_back(joint->getName());
+  //   linkNames.push_back(joint->parent->getName());
+
+  //   if (joint->getType() == JointType::FIXED) {
+  //     // if the joint is fixed, we should not add any generalized coordinates
+  //     // and velocities
+  //     idx_qs_.push_back(-1);
+  //     nqs_.push_back(-1);
+  //     idx_vs_.push_back(-1);
+  //     nvs_.push_back(-1);
+  //   } else {
+  //     idx_qs_.push_back(nq_);
+  //     nqs_.push_back(joint->gc_length());
+  //     idx_vs_.push_back(nv_);
+  //     nvs_.push_back(joint->gv_length());
+  //     // we should shift accordingly
+  //     nq_ += joint->gc_length();
+  //     nv_ += joint->gv_length();
+  //   }
+
+  //   // now we have to add a child of this link
+  //   addLink(joint->child, joint->getIndex());
+  // }
+
+  // std::shared_ptr<Joint> linkUpward(std::shared_ptr<Link> link) const {
+  //   // this function finds the joint where the link is the child of the joint
+  //   // and returns the joint
+  //   for (auto joint : joints_) {
+  //     if (joint->child == link) {
+  //       return joint;
+  //     }
+  //   }
+
+  //   std::cerr << "Link " << link->getName() << " is not a child of any
+  //   joint."
+  //             << std::endl;
+  //   return nullptr;
+  // }
+
+  // bool isLeaf(std::shared_ptr<Link> link) const {
+  //   // this function checks if the link is a leaf
+  //   for (auto joint : joints_) {
+  //     if (joint->parent == link) {
+  //       return false;
+  //     }
+  //   }
+
+  //   return true;
+  // }
+
+  // std::vector<std::shared_ptr<Joint>>
+  // getAttachedJoints(std::shared_ptr<Link> link) const {
+  //   // this function returns all the joints that are attached to the link
+  //   std::vector<std::shared_ptr<Joint>> attachedJoints;
+  //   for (auto joint : joints_) {
+  //     if (joint->parent == link) {
+  //       attachedJoints.push_back(joint);
+  //     }
+  //   }
+
+  //   return attachedJoints;
+  // }
 
   void parseURDF(const raisim::TiXmlDocument &urdf) {
     auto root = urdf.RootElement();
@@ -448,6 +522,13 @@ public:
     auto linkName = link.Attribute("name");
     // return std::make_shared<Link>(linkName);
     auto inertial = link.FirstChildElement("inertial");
+
+    if (inertial == nullptr) {
+      std::cout << "Link " << linkName << " does not have an inertial element."
+                << std::endl;
+      return std::make_shared<Link>(linkName);
+    }
+
     assert(inertial != nullptr);
 
     auto massEl = inertial->FirstChildElement("mass")->Attribute("value");
@@ -558,41 +639,52 @@ public:
                                    type, jointName);
   }
 
-  int nq_;      // number of generalized coordinates
-  int nv_;      // number of generalized velocities
-  int nbodies_; // number of bodies
-  int nframes_; // number of frames
-  int njoints_; // number of joints
+  // int nq_; // number of generalized coordinates
+  // int nv_; // number of generalized velocities
+  // // int nbodies_; // number of bodies
+  // int nframes_; // number of frames
+  // int njoints_; // number of joints
 
-  // data due various types of joints and their generalized representation
-  std::vector<int> idx_qs_; // generalized coordinate indices
-  std::vector<int> nqs_;    // generalized coordinate lengths
-  std::vector<int> idx_vs_; // generalized velocity indices
-  std::vector<int> nvs_;    // generalized velocity lengths
+  // // data due various types of joints and their generalized representation
+  // std::vector<int> idx_qs_; // generalized coordinate indices
+  // std::vector<int> nqs_;    // generalized coordinate lengths
+  // std::vector<int> idx_vs_; // generalized velocity indices
+  // std::vector<int> nvs_;    // generalized velocity lengths
 
-  // kinematic data
-  // joint-placement transformations wrt world frame
-  std::vector<Transform> jointPlacements;
-  std::vector<size_t> parentIdxs;
-  std::vector<size_t> childIdxs;
-  std::vector<std::string> jointNames;
-  std::vector<std::string> linkNames;
+  // // kinematic data
+  // // joint-placement transformations wrt world frame
+  // std::vector<Transform> jointPlacements;
+  // std::vector<size_t> parentIdxs;
+  // std::vector<size_t> childIdxs;
+  // std::vector<std::string> jointNames;
+  // std::vector<std::string> linkNames;
 
-  std::vector<std::shared_ptr<Link>> sortedLinks;
-  std::vector<std::shared_ptr<Joint>> sortedJoints;
+  // std::vector<std::shared_ptr<Link>> sortedLinks;
+  // std::vector<std::shared_ptr<Joint>> sortedJoints;
 
   std::vector<std::shared_ptr<Link>> links_;
   std::vector<std::shared_ptr<Joint>> joints_;
   std::map<std::string, std::shared_ptr<Link>> linkMap_;
 
-  // for given index of generalized velocity, return the previous generalized
-  // velocity source
-  int dof_;
-  std::vector<int> dof_parent;
+  // // for given index of generalized velocity, return the previous generalized
+  // // velocity source
+  // int dof_;
+  // std::vector<int> dof_parent;
 
-  std::string _world_name = "world";
-  // those joints are the leaves of kinematic tree
-  std::vector<std::shared_ptr<Joint>> leaves_;
+  // std::string _world_name = "world";
+  // // those joints are the leaves of kinematic tree
+  // std::vector<std::shared_ptr<Joint>> leaves_;
+
+  // new structures
+  int nbodies_;
+  // an array of parent indices, size of Nbodies
+  std::vector<size_t> parents;
+  // an array of joints, size of Nbodies
+  std::vector<std::shared_ptr<Joint>> joints;
+  std::vector<std::shared_ptr<Link>> links;
+  // tree transform array,
+  // the position of the joint relative to the parent link
+  std::vector<Transform> X_T;
 };
 
 #endif
