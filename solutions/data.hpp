@@ -7,38 +7,39 @@ class Data {
 public:
   Data(const Model &model) {};
 
-  // links with respect to world frame
-  std::vector<Transform> oTb;
+  // // links with respect to world frame
+  // std::vector<Transform> oTb;
 
-  // joints with respect to world frame
-  std::vector<Transform> oTj;
+  // // joints with respect to world frame
+  // std::vector<Transform> oTj;
 
-  // frames velocities
-  std::vector<Eigen::Vector3d> bodyLinVel_w;
-  std::vector<Eigen::Vector3d> bodyAngVel_w;
+  // // frames velocities
+  // std::vector<Eigen::Vector3d> bodyLinVel_w;
+  // std::vector<Eigen::Vector3d> bodyAngVel_w;
 
-  // link frames
-  std::vector<Transform> oTw;
+  // // link frames
+  // std::vector<Transform> oTw;
 
-  // jacobian
-  Eigen::MatrixXd posJacobian;
-  Eigen::MatrixXd rotJacobian;
+  // // jacobian
+  // Eigen::MatrixXd posJacobian;
+  // Eigen::MatrixXd rotJacobian;
 
-  // crba
-  std::vector<Transform> comW; // center of mass in world frame for each link
-  std::vector<Eigen::Matrix3d> inertiaW; // inertia in world frame for each link
+  // // crba
+  // std::vector<Transform> comW; // center of mass in world frame for each link
+  // std::vector<Eigen::Matrix3d> inertiaW; // inertia in world frame for each
+  // link
 
-  // composite inertia in world frame of each subtree rooted at the link
-  std::vector<Eigen::Matrix3d> compositeInertiaW;
-  std::vector<double> compositeMassW; // mass of each subtree rooted at the link
-  std::vector<Eigen::Vector3d>
-      compositeComW; // com of each subtree rooted at the link
+  // // composite inertia in world frame of each subtree rooted at the link
+  // std::vector<Eigen::Matrix3d> compositeInertiaW;
+  // std::vector<double> compositeMassW; // mass of each subtree rooted at the
+  // link std::vector<Eigen::Vector3d>
+  //     compositeComW; // com of each subtree rooted at the link
 
-  // composite inertia in world frame of each subtree rooted at the link
-  std::vector<Eigen::MatrixXd> compositeSpatialInertia6;
-  std::vector<Eigen::Matrix<double, 6, 1>> S_W;
+  // // composite inertia in world frame of each subtree rooted at the link
+  // std::vector<Eigen::MatrixXd> compositeSpatialInertia6;
+  // std::vector<Eigen::Matrix<double, 6, 1>> S_W;
 
-  Eigen::MatrixXd massMatrix; // mass matrix
+  // Eigen::MatrixXd massMatrix; // mass matrix
 };
 
 #endif // DATA_HPP
