@@ -15,9 +15,24 @@
 
 namespace algorithms {
 
-inline void updateKinematicTree(const Model &model, Data &data,
-                                const Eigen::VectorXd &gc,
-                                const Eigen::VectorXd &gv) {
+inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
+                     const Eigen::VectorXd &gv) {
+  for (size_t i = 0; i < model.nbodies_; i++) {
+    // joint model is identity right now, we don't consider the generalized
+    // coordinate yet
+
+    Transform X_J = Transform::Identity();
+    Transform iXp = X_J * model.X_T_[i];
+
+    size_t parentId = model.parents_[i];
+
+    if (parentId != -1) {
+      data.iXj_[i] = iXp * data.iXj_[parentId];
+    } else {
+      data.iXj_[i] = iXp;
+    }
+  }
+
   return;
 }
 
@@ -98,10 +113,12 @@ inline void updateKinematicTree(const Model &model, Data &data,
 
 //     // positional jacobian
 //     if (joint->getType() == JointType::REVOLUTE) {
-//       data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+//       data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()])
+//       =
 //           axisW.cross(r);
 //     } else if (joint->getType() == JointType::PRISMATIC) {
-//       data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+//       data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()])
+//       =
 //           axisW;
 //     } else {
 //       std::cout << "skipping joint " << joint->getName()
@@ -158,7 +175,8 @@ inline void updateKinematicTree(const Model &model, Data &data,
 
 //     if (joint->getType() == JointType::REVOLUTE || joint->getParentDof() ==
 //     7) {
-//       data.rotJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+//       data.rotJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()])
+//       =
 //           axisW;
 //     }
 //   }
@@ -199,10 +217,12 @@ inline void updateKinematicTree(const Model &model, Data &data,
 //       // TODO: hack for the mess at the end effector
 
 //       jointAxisW(model, data, 11, axisW);
-//       data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+//       data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()])
+//       =
 //           axisW;
 //     } else {
-//       data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()]) =
+//       data.posJacobian.block<3, 1>(0, model.idx_vs_[joint->getParentDof()])
+//       =
 //           axisW.cross(r);
 //     }
 //   }
@@ -310,7 +330,8 @@ inline void updateKinematicTree(const Model &model, Data &data,
 
 //   data.compositeInertiaW[1] = I_aboutOrigin;
 
-//   // std::cout << "updated composite inertia about origin of index " << 1 <<
+//   // std::cout << "updated composite inertia about origin of index " << 1
+//   <<
 //   ":
 //   // "
 //   //           << std::endl
@@ -385,7 +406,8 @@ inline void updateKinematicTree(const Model &model, Data &data,
 //   }
 // }
 
-// inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
+// inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc)
+// {
 //   data.massMatrix = Eigen::MatrixXd::Zero(model.nv_, model.nv_);
 //   data.massMatrix.setZero();
 
@@ -470,11 +492,13 @@ inline void updateKinematicTree(const Model &model, Data &data,
 //   //     //           << " parentdof: " << jointJ->getParentDof()
 //   //     //           << " column: " << columnIdx << std::endl;
 
-//   //     std::cout << "M_" << columnI << "," << columnJ << " = " << parentDof
+//   //     std::cout << "M_" << columnI << "," << columnJ << " = " <<
+//   parentDof
 //   //               << std::endl;
 
 //   //     if (parentDof == -1) {
-//   //       // std::cout << "Found root: " << jointJ->getName() << std::endl;
+//   //       // std::cout << "Found root: " << jointJ->getName() <<
+//   std::endl;
 //   //       // std::cout << "check" << std::endl;
 //   //       break;
 //   //     }

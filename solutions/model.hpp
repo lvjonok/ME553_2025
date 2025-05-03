@@ -260,7 +260,7 @@ public:
     parseURDF(urdf);
     // at this points we only filled the links and joints
 
-    parents.resize(0);
+    parents_.resize(0);
 
     // now with the parent array
     // first, find the link that is not a child of any joint
@@ -318,28 +318,29 @@ public:
     // now we can traverse the children and fill the parent array
     // addLink(rootLink, -1, false, isFixedBase);
     nbodies_ = 0;
-    parents.clear();
+    parents_.clear();
     traverse(links_[0], -1);
 
     std::cout << "printing bodies and actuated joints in order" << std::endl;
-    nbodies_ = bodies.size();
+    nbodies_ = bodies_.size();
     for (size_t i = 0; i < nbodies_; i++) {
-      auto link = bodies[i];
+      auto link = bodies_[i];
       std::cout << "link name: " << link->getName() << std::endl;
     }
     std::cout << "printing actuated joints in order" << std::endl;
-    for (size_t i = 0; i < actuated_joints.size(); i++) {
-      auto joint = actuated_joints[i];
+    for (size_t i = 0; i < actuated_joints_.size(); i++) {
+      auto joint = actuated_joints_[i];
       std::cout << "joint name: " << joint->getName() << std::endl;
     }
 
-    // // now as we have parsed everything, we can set the tree transformation
-    // X_T.resize(nbodies_);
-    // for (size_t i = 0; i < nbodies_; i++) {
-    //   auto joint = joints_[i];
-
-    //   X_T[i] = joint->jointPlacement();
-    // }
+    // now as we have parsed everything, we can set the tree transformation
+    // by URDF convention, bodies do not have a transformation (they are just
+    // attached to the corresponding joint)
+    X_T_.resize(nbodies_);
+    for (size_t i = 0; i < nbodies_; i++) {
+      auto joint = joints_[i];
+      X_T_[i] = joint->jointPlacement();
+    }
   }
 
   void traverse(std::shared_ptr<Link> link, int currentBodyId) {
@@ -355,12 +356,15 @@ public:
       // this joint is attached to this link
       if (joint->getType() == JointType::FIXED && currentBodyId == -1) {
         int newBodyId = nbodies_++;
-        parents.push_back(currentBodyId);
-        bodies.push_back(joint->child); // world -> fixed_joint -> child
+        parents_.push_back(currentBodyId);
+        bodies_.push_back(joint->child); // world -> fixed_joint -> child
+
+        gc_idx_.push_back(-1);
+        gv_idx_.push_back(-1);
 
         // TODO: this is a little weird, but even RAILAB does this
         // we consider first fixed joint for fixed-base robots
-        actuated_joints.push_back(joint);
+        actuated_joints_.push_back(joint);
 
         traverse(joint->child, newBodyId);
         return;
@@ -372,9 +376,14 @@ public:
       } else {
         // this is a new Body
         int newBodyId = nbodies_++;
-        parents.push_back(currentBodyId);
-        bodies.push_back(joint->child); // link1 -> fixed_joint -> link2
-        actuated_joints.push_back(joint);
+        parents_.push_back(currentBodyId);
+        bodies_.push_back(joint->child); // link1 -> fixed_joint -> link2
+        actuated_joints_.push_back(joint);
+
+        gc_idx_.push_back(gc_size_);
+        gv_idx_.push_back(gv_size_);
+        gc_size_ += joint->gc_length();
+        gv_size_ += joint->gv_length();
 
         traverse(joint->child, newBodyId);
       }
@@ -586,13 +595,20 @@ public:
   // new structures
   int nbodies_;
   // an array of parent indices, size of Nbodies
-  std::vector<size_t> parents;
+  std::vector<size_t> parents_;
   // an array of joints, size of Nbodies
-  std::vector<std::shared_ptr<Joint>> actuated_joints;
-  std::vector<std::shared_ptr<Link>> bodies;
+  std::vector<std::shared_ptr<Joint>> actuated_joints_;
+  std::vector<std::shared_ptr<Link>> bodies_;
+
+  // mapping from body index to generalized coordinate and velocity indices,
+  // size of NBodies
+  int gc_size_ = 0;
+  int gv_size_ = 0;
+  std::vector<size_t> gc_idx_;
+  std::vector<size_t> gv_idx_;
   // tree transform array,
   // the position of the joint relative to the parent link
-  std::vector<Transform> X_T;
+  std::vector<Transform> X_T_;
 };
 
 #endif

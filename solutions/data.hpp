@@ -5,7 +5,15 @@
 
 class Data {
 public:
-  Data(const Model &model) {};
+  Data(const Model &model) {
+    iXj_.resize(model.actuated_joints_.size());
+    for (size_t i = 0; i < model.actuated_joints_.size(); i++) {
+      iXj_[i] = Transform::Identity();
+    }
+  };
+
+  // the position of the body frame j relative to the joint frame i
+  std::vector<Transform> iXj_;
 
   // // links with respect to world frame
   // std::vector<Transform> oTb;
