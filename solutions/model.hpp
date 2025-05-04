@@ -173,6 +173,12 @@ public:
         JointType type, std::string jointName)
       : parent(parent), child(child), axis(axis), type_(type),
         joint_name(jointName) {
+    if (type_ == JointType::FIXED) {
+      // TODO: this was done specifically to match the doubleCartPole model
+      this->axis.setZero();
+      this->axis(2) = 1;
+    }
+
     this->origin = Transform::Identity();
     this->origin.block<3, 3>(0, 0) = RotZ(rpy[2]) * RotY(rpy[1]) * RotX(rpy[0]);
     this->origin.block<3, 1>(0, 3) = xyz;

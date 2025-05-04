@@ -41,6 +41,48 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
     // perform the transformation
     data.rot_WB[i] = pRotW * R_PJ * R_J;
     data.jointPos_W[i] = pPosW + pRotW * (P_PJ + R_PJ * P_J);
+    data.jointAxis_W[i] = data.rot_WB[i] * joint->getAxis();
+  }
+
+  // calculate the velocity of the body
+  Eigen::Vector3d pVelW = Eigen::Vector3d::Zero();
+  Eigen::Vector3d pAngVelW = Eigen::Vector3d::Zero();
+  for (size_t i = 0; i < model.nbodies_; i++) {
+    auto parentId = model.parents_[i];
+    if (parentId != -1) {
+      pVelW = data.bodyLinVel_w[parentId];
+      pAngVelW = data.bodyAngVel_w[parentId];
+    }
+
+    if (model.gv_idx_[i] == -1) {
+      std::cout << "Joint " << i << " is not actuated, skipping...\n";
+      data.bodyLinVel_w[i] = pVelW;
+      data.bodyAngVel_w[i] = pAngVelW;
+      continue;
+    }
+
+    auto joint = model.actuated_joints_[i];
+    auto r = data.jointPos_W[i];
+    if (parentId != 1) {
+      r = data.jointPos_W[i] - data.jointPos_W[parentId];
+    }
+    Eigen::Vector3d P_PJ = joint->jointPlacement().block<3, 1>(0, 3);
+    if (joint->getType() == JointType::PRISMATIC) {
+      // for linear joint we only contribute to the linear velocity
+      data.bodyLinVel_w[i] = pVelW + pAngVelW.cross(r) +
+                             data.jointAxis_W[i] * gv[model.gv_idx_[i]];
+      data.bodyAngVel_w[i] = pAngVelW;
+    } else if (joint->getType() == JointType::REVOLUTE) {
+      // for revolute joint we only contribute to the angular velocity
+      data.bodyAngVel_w[i] =
+          pAngVelW + data.jointAxis_W[i] * gv[model.gv_idx_[i]];
+      data.bodyLinVel_w[i] = pVelW;
+      data.bodyLinVel_w[i] += pAngVelW.cross(r);
+    } else {
+      // for floating joint we contribute to both linear and angular velocity
+      data.bodyLinVel_w[i] = gv.segment(0, 3);
+      data.bodyAngVel_w[i] = gv.segment(3, 3);
+    }
   }
 }
 
@@ -107,16 +149,12 @@ inline void getBodyPose(const Model &model, Data &data, size_t bodyId,
   p = data.jointPos_W[bodyId];
 }
 
-// inline void getBodyTwist(const Model &model, Data &data, size_t bodyId,
-//                          Motion &twist) {
-//   // get the twist of the body in the world frame
-//   auto body = model.bodies_[bodyId];
-
-//   auto iXj = data.iXj_[bodyId];
-//   auto R = iXj.block<3, 3>(0, 0);
-
-//   twist = data.vJ_[bodyId];
-// }
+inline void getBodyTwist(const Model &model, Data &data, size_t bodyId,
+                         Eigen::Vector3d &linVel, Eigen::Vector3d &angVel) {
+  // get the velocity of the body in the world frame
+  linVel = data.bodyLinVel_w[bodyId];
+  angVel = data.bodyAngVel_w[bodyId];
+}
 
 // inline void framesForwardKinematics(const Model &model, Data &data,
 //                                     const Eigen::VectorXd &gc) {
