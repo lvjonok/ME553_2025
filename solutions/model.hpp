@@ -2,6 +2,7 @@
 #define ME553_2025_MODEL_HPP_
 
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 #include <cstddef>
 #include <iostream>
 #include <map>
@@ -105,15 +106,15 @@ inline SpatialTransform bXa(const Eigen::Matrix3d &R,
   return X;
 }
 
-// inline SpatialTransform aXb(const Eigen::Matrix3d &R,
-//                             const Eigen::Vector3d &p) {
-//   SpatialTransform X;
-//   X.setZero();
-//   X.block<3, 3>(0, 0) = R.transpose();
-//   X.block<3, 3>(3, 3) = R.transpose();
-//   X.block<3, 3>(0, 3) = skew(p) * R.transpose();
-//   return X;
-// }
+inline SpatialTransform aXb(const Eigen::Matrix3d &R,
+                            const Eigen::Vector3d &p) {
+  SpatialTransform X;
+  X.setZero();
+  X.block<3, 3>(0, 0) = R.transpose();
+  X.block<3, 3>(3, 3) = R.transpose();
+  X.block<3, 3>(0, 3) = skew(p) * R.transpose();
+  return X;
+}
 
 class Link {
 public:
@@ -223,9 +224,19 @@ public:
     }
 
     if (type_ == JointType::FLOATING) {
+      Eigen::Vector3d xyz = gc.head<3>();
 
-      return std::make_tuple(SpatialTransform::Identity(),
-                             Eigen::MatrixXd::Zero(6, 6));
+      // by convention the generalized coordinates are
+      // x, y, z, qw, qx, qy, qz
+      Eigen::Vector4d quat_raw = gc.segment<4>(3);
+      Eigen::Quaterniond quat(quat_raw(0), quat_raw(1), quat_raw(2),
+                              quat_raw(3));
+      Eigen::Matrix3d R = quat.toRotationMatrix();
+
+      SpatialTransform X = bXa(R, R.transpose() * xyz);
+      Eigen::MatrixXd S(6, 6);
+
+      return std::make_tuple(X, S);
     }
 
     if (type_ == JointType::PRISMATIC) {

@@ -5,7 +5,6 @@
 #include "model.hpp"
 #include <Eigen/Core>
 #include <cstddef>
-#include <eigen3/Eigen/src/Core/Matrix.h>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -50,8 +49,8 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
       data.iTj_[i] = data.iTj_[parentId] * iTp * T_J;
       data.iXj_[i] = data.iXj_[parentId] * iXp * X_J;
     } else {
-      data.iTj_[i] = iTp;
-      data.iXj_[i] = iXp;
+      data.iTj_[i] = iTp * T_J;
+      data.iXj_[i] = iXp * X_J;
     }
   }
 
