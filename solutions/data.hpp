@@ -6,14 +6,22 @@
 class Data {
 public:
   Data(const Model &model) {
+    iTj_.resize(model.actuated_joints_.size());
     iXj_.resize(model.actuated_joints_.size());
+    iX0_.resize(model.actuated_joints_.size());
     for (size_t i = 0; i < model.actuated_joints_.size(); i++) {
-      iXj_[i] = Transform::Identity();
+      iTj_[i] = Transform::Identity();
+      iXj_[i] = SpatialTransform::Identity();
+      iX0_[i] = SpatialTransform::Identity();
     }
   };
 
   // the position of the body frame j relative to the joint frame i
-  std::vector<Transform> iXj_;
+  std::vector<Transform> iTj_;
+  std::vector<SpatialTransform> iXj_;
+
+  std::vector<SpatialTransform> iX0_; // the position of the body frame i
+                                      // relative to the world frame
 
   // // links with respect to world frame
   // std::vector<Transform> oTb;

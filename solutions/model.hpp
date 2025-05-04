@@ -3,7 +3,6 @@
 
 #include <Eigen/Core>
 #include <cstddef>
-#include <eigen3/Eigen/src/Core/Matrix.h>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -12,7 +11,31 @@
 #include <vector>
 
 using Transform = Eigen::Matrix4d;
+using SpatialTransform = Eigen::Matrix<double, 6, 6>;
 
+inline Eigen::Matrix3d skew(const Eigen::Vector3d &v) {
+  Eigen::Matrix3d skew;
+
+  // clang-format off
+    skew << 0, -v(2), v(1), 
+            v(2), 0, -v(0), 
+            -v(1), v(0), 0;
+  // clang-format on
+
+  return skew;
+}
+
+inline Eigen::Vector3d unskew(const Eigen::Matrix3d &v) {
+  Eigen::Vector3d skew;
+
+  skew(0) = v(2, 1);
+  skew(1) = v(0, 2);
+  skew(2) = v(1, 0);
+
+  return skew;
+}
+
+// TODO: check and make in line with Featherstone notation
 inline Eigen::Matrix3d RotX(double theta) {
   Eigen::Matrix3d R;
   R << 1, 0, 0, 0, cos(theta), -sin(theta), 0, sin(theta), cos(theta);
@@ -31,6 +54,34 @@ inline Eigen::Matrix3d RotZ(double theta) {
   return R;
 }
 
+/// Returns a 3×3 rotation matrix from roll, pitch, yaw (ZYX convention).
+/// roll  = rotation about X
+/// pitch = rotation about Y
+/// yaw   = rotation about Z
+inline Eigen::Matrix3d RotRPY(double roll, double pitch, double yaw) {
+  double cr = std::cos(roll);
+  double sr = std::sin(roll);
+  double cp = std::cos(pitch);
+  double sp = std::sin(pitch);
+  double cy = std::cos(yaw);
+  double sy = std::sin(yaw);
+
+  Eigen::Matrix3d R;
+  R(0, 0) = cy * cp;
+  R(0, 1) = cy * sp * sr - sy * cr;
+  R(0, 2) = cy * sp * cr + sy * sr;
+
+  R(1, 0) = sy * cp;
+  R(1, 1) = sy * sp * sr + cy * cr;
+  R(1, 2) = sy * sp * cr - cy * sr;
+
+  R(2, 0) = -sp;
+  R(2, 1) = cp * sr;
+  R(2, 2) = cp * cr;
+
+  return R;
+}
+
 inline Eigen::Matrix3d RotAxisAngle(const Eigen::Vector3d &axis, double angle) {
   Eigen::Vector3d k = axis.normalized();
   double c = std::cos(angle);
@@ -42,6 +93,26 @@ inline Eigen::Matrix3d RotAxisAngle(const Eigen::Vector3d &axis, double angle) {
   return c * Eigen::Matrix3d::Identity() + (1 - c) * (k * k.transpose()) +
          s * K;
 }
+
+inline SpatialTransform bXa(const Eigen::Matrix3d &R,
+                            const Eigen::Vector3d &p) {
+  SpatialTransform X;
+  X.setZero();
+  X.block<3, 3>(0, 0) = R;
+  X.block<3, 3>(3, 3) = R;
+  X.block<3, 3>(3, 0) = -R * skew(p);
+  return X;
+}
+
+// inline SpatialTransform aXb(const Eigen::Matrix3d &R,
+//                             const Eigen::Vector3d &p) {
+//   SpatialTransform X;
+//   X.setZero();
+//   X.block<3, 3>(0, 0) = R.transpose();
+//   X.block<3, 3>(3, 3) = R.transpose();
+//   X.block<3, 3>(0, 3) = skew(p) * R.transpose();
+//   return X;
+// }
 
 class Link {
 public:
@@ -98,22 +169,93 @@ public:
   Joint(std::shared_ptr<Link> parent, std::shared_ptr<Link> child,
         Eigen::Vector3d axis, Eigen::Vector3d xyz, Eigen::Vector3d rpy,
         JointType type, std::string jointName)
-      : parent(parent), child(child), axis(axis), xyz(xyz), rpy(rpy),
-        type_(type), joint_name(jointName) {}
+      : parent(parent), child(child), axis(axis), type_(type),
+        joint_name(jointName) {
+    this->origin = Transform::Identity();
+    this->origin.block<3, 3>(0, 0) = RotZ(rpy[2]) * RotY(rpy[1]) * RotX(rpy[0]);
+    this->origin.block<3, 1>(0, 3) = xyz;
+  }
+
+  Joint(std::shared_ptr<Link> parent, std::shared_ptr<Link> child,
+        Eigen::Vector3d axis, Transform origin, JointType type,
+        std::string jointName)
+      : parent(parent), child(child), axis(axis), type_(type), origin(origin),
+        joint_name(jointName) {}
 
   // compute the transform from parent to child
   // this is const and defined by the URDF only
-  Transform jointPlacement() {
-    // euler angles
-    Eigen::Matrix3d R = RotZ(rpy[2]) * RotY(rpy[1]) * RotX(rpy[0]);
+  Transform jointPlacement() const {
+    return origin;
 
-    Transform T = Transform::Identity();
-    T.block<3, 3>(0, 0) = R;
-    T.block<3, 1>(0, 3) = xyz;
-    // std::cout << "T: " << T << std::endl;
-    // std::cout << "xyz: " << xyz << std::endl;
+    // // euler angles
+    // Eigen::Matrix3d R = RotZ(rpy[2]) * RotY(rpy[1]) * RotX(rpy[0]);
 
-    return T;
+    // Transform T = Transform::Identity();
+    // T.block<3, 3>(0, 0) = R;
+    // T.block<3, 1>(0, 3) = xyz;
+    // // std::cout << "T: " << T << std::endl;
+    // // std::cout << "xyz: " << xyz << std::endl;
+
+    // return T;
+  }
+
+  SpatialTransform spatialJointPlacement() {
+    Transform T = jointPlacement();
+
+    auto R = T.block<3, 3>(0, 0);
+    auto p = T.block<3, 1>(0, 3);
+
+    // the order of translation and rotation is different to the ordinary
+    // homogeneous transformations
+    return bXa(R, R.transpose() * p);
+  }
+
+  // mergeJoint should be called when we have a structure like
+  // link -> joint -> link -> fixed joint -> link -> joint
+  // this way we want to merge first and second joint together
+  // because the fixed joint does not contribute to the motion
+  // then, first joint along can describe the resulting transformation
+  Joint *mergeJoint(const Joint &other) {
+    auto T1 = jointPlacement();
+    auto T2 = other.jointPlacement();
+
+    return new Joint(parent, other.child, axis, T1 * T2, type_,
+                     joint_name + "_" + other.joint_name);
+  }
+
+  // SpatialTransform jointPlacement() {
+  //   // Eigen::Matrix3d R = RotZ(rpy[2]) * RotY(rpy[1]) * RotX(rpy[0]);
+  //   Eigen::Matrix3d R = RotRPY(rpy[0], rpy[1], rpy[2]);
+
+  //   // Transform T = Transform::Identity();
+  //   // T.block<3, 3>(0, 0) = R;
+  //   // T.block<3, 1>(0, 3) = xyz;
+
+  //   // Transform T_inv = T.inverse();
+  //   // R = T_inv.block<3, 3>(0, 0);
+  //   // xyz = T_inv.block<3, 1>(0, 3);
+
+  //   return bXa(R.transpose(), xyz);
+
+  //   // Eigen::Matrix3d R = Eigen::expm1(xyz);
+
+  //   // SpatialTransform XR = SpatialTransform::Identity();
+  //   // XR.block<3, 3>(0, 0) = R;
+  //   // XR.block<3, 3>(3, 3) = R;
+  //   // XR.block<3, 3>(3, 0) = -R * skew(xyz);
+
+  //   // return XR;
+
+  //   // SpatialTransform XP = SpatialTransform::Identity();
+  //   // XR.block<3, 3>(3, 0) = skew(-xyz);
+
+  //   // return (XR * XP).inverse();
+  // }
+
+  // TODO: add motion subspace matrix here and everything else
+  Transform jcalc(const Eigen::VectorXd &gc, int start_idx) {
+    std::cout << "entering jcalc" << std::endl;
+    return motion(gc, start_idx, gc_length());
   }
 
   // compute the transform due to motion
@@ -147,7 +289,11 @@ public:
 
   // Motion transformation is defined as a function of generalized coordinates
   // we pass the start index and length of the generalized coordinates
-  Transform motion(const Eigen::VectorXd &gc, int start_idx, int length) {
+  Transform motion(const Eigen::VectorXd &gc, size_t start_idx, size_t length) {
+    if (start_idx == -1) {
+      return Transform::Identity();
+    }
+
     if (length == 1)
       return motion(gc[start_idx]);
 
@@ -230,10 +376,13 @@ private:
   // axis definition, optional, default is [1, 0, 0]
   Eigen::Vector3d axis;
 
-  // origin definition
-  Eigen::Vector3d xyz; // default is [0, 0, 0]
-  // XYZ Euler angle definition
-  Eigen::Vector3d rpy; // default is [0, 0, 0]
+  // // origin definition
+  // Eigen::Vector3d xyz; // default is [0, 0, 0]
+  // // XYZ Euler angle definition
+  // Eigen::Vector3d rpy; // default is [0, 0, 0]
+
+  // origin definition through transform
+  Transform origin;
 
   // in order to apply generalized coordinates and velocities
   // later, we have to keep track of the joint type and starting index
@@ -336,17 +485,27 @@ public:
     // now as we have parsed everything, we can set the tree transformation
     // by URDF convention, bodies do not have a transformation (they are just
     // attached to the corresponding joint)
+    T_T_.resize(nbodies_);
     X_T_.resize(nbodies_);
     for (size_t i = 0; i < nbodies_; i++) {
-      auto joint = joints_[i];
-      X_T_[i] = joint->jointPlacement();
+      auto joint = actuated_joints_[i];
+      T_T_[i] = joint->jointPlacement();
+      X_T_[i] = joint->spatialJointPlacement();
     }
   }
 
-  void traverse(std::shared_ptr<Link> link, int currentBodyId) {
+  void traverse(std::shared_ptr<Link> link, int currentBodyId,
+                Joint *fixed_joints_ = nullptr) {
     // TODO: we should introduce a way to merge bodies that are connected
     // through a fixed joint this is important for dynamics computations, but
     // may be overkill for now
+
+    // this should be reset on every actuated joint, but accumulated for a chain
+    // of fixed joints
+    // then, this transform will be used to premultiply the transformation for
+    // the next actuated joint
+    // this way we can merge the fixed joints together
+    // Joint *fixed_joints = nullptr;
 
     for (const auto &joint : joints_) {
       // skip joints that are not related to the current link
@@ -372,13 +531,47 @@ public:
 
       if (joint->getType() == JointType::FIXED) {
         // this is a fixed joint, it should not be added to the bodies
-        traverse(joint->child, currentBodyId);
+
+        Joint *new_fixed_joint = nullptr;
+
+        if (fixed_joints_ == nullptr) {
+          new_fixed_joint = joint.get();
+        } else {
+          // we have to merge the fixed joints together
+          new_fixed_joint =
+              fixed_joints_->mergeJoint(*joint); // merge the fixed joints
+          std::cout << "merging joints, got " << new_fixed_joint->getName()
+                    << std::endl;
+        }
+        traverse(joint->child, currentBodyId, new_fixed_joint);
+
+        // auto last_joint = actuated_joints_.back();
+        // auto merged_joint = joint->mergeJoint(*last_joint);
+        // // auto merged_joint = last_joint->mergeJoint(*joint);
+        // actuated_joints_.pop_back();
+        // actuated_joints_.push_back(std::make_shared<Joint>(merged_joint));
+
       } else {
         // this is a new Body
         int newBodyId = nbodies_++;
         parents_.push_back(currentBodyId);
         bodies_.push_back(joint->child); // link1 -> fixed_joint -> link2
-        actuated_joints_.push_back(joint);
+
+        std::shared_ptr<Joint> newJoint = nullptr;
+
+        if (fixed_joints_ != nullptr) {
+          // we have a chain of fixed joints behind,
+          // now we have to merge them before the actuated joint
+          newJoint = std::make_shared<Joint>(
+              *fixed_joints_->mergeJoint(*joint)); // merge the fixed joints
+          std::cout << "actuated joint with fixed joints, got "
+                    << newJoint->getName() << std::endl;
+        } else {
+          newJoint = joint;
+        }
+        // fixed_joints_ = nullptr;
+
+        actuated_joints_.push_back(newJoint);
 
         gc_idx_.push_back(gc_size_);
         gv_idx_.push_back(gv_size_);
@@ -608,7 +801,10 @@ public:
   std::vector<size_t> gv_idx_;
   // tree transform array,
   // the position of the joint relative to the parent link
-  std::vector<Transform> X_T_;
+  std::vector<Transform> T_T_;
+  std::vector<SpatialTransform> X_T_;
+
+  // Joint *fixed_joints_ = nullptr;
 };
 
 #endif
