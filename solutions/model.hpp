@@ -215,8 +215,10 @@ public:
                      joint_name + "_" + other.joint_name);
   }
 
-  std::tuple<SpatialTransform, Eigen::MatrixXd> jcalc(const Eigen::VectorXd &gc,
-                                                      int start_idx) {
+  std::tuple<SpatialTransform, Motion> jcalc(const Eigen::VectorXd &gc,
+                                             int start_idx,
+                                             const Eigen::VectorXd &gv,
+                                             int gv_start_idx) {
     if (type_ == JointType::FIXED) {
       throw std::runtime_error("Trying to compute "
                                "motion for a fixed "
@@ -236,7 +238,7 @@ public:
       SpatialTransform X = bXa(R, R.transpose() * xyz);
       Eigen::MatrixXd S(6, 6);
 
-      return std::make_tuple(X, S);
+      return std::make_tuple(X, S * gv.segment<6>(gv_start_idx));
     }
 
     if (type_ == JointType::PRISMATIC) {
@@ -249,7 +251,7 @@ public:
       S.setZero();
       S.tail<3>() = axis; // v
 
-      return std::make_tuple(X, S);
+      return std::make_tuple(X, S * gv[gv_start_idx]);
     }
 
     if (type_ == JointType::REVOLUTE) {
@@ -261,7 +263,7 @@ public:
       S.setZero();
       S.head<3>() = axis; // omega
 
-      return std::make_tuple(X, S);
+      return std::make_tuple(X, S * gv[gv_start_idx]);
     }
 
     throw std::runtime_error(

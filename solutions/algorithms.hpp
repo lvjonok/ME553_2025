@@ -24,15 +24,18 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
 
     Transform T_J = Transform::Identity();
     SpatialTransform X_J = SpatialTransform::Identity();
+    // Eigen::MatrixXd S;
+    Motion vJ = Motion::Zero();
     if (joint->getType() != JointType::FIXED) {
       // std::cout << "joint " << joint->getName() << " uses gc "
       //           << gc[model.gc_idx_[i]] << " gv " << gv[model.gv_idx_[i]]
       //           << std::endl;
 
-      auto res = joint->jcalc(gc, model.gc_idx_[i]);
+      auto res = joint->jcalc(gc, model.gc_idx_[i], gv, model.gv_idx_[i]);
       // T_J = joint->jcalcOld(gc, model.gc_idx_[i]);
 
       X_J = std::get<0>(res);
+      vJ = std::get<1>(res);
     } else {
       std::cout << "Use identity for joint " << joint->getName() << std::endl;
     }
@@ -48,9 +51,16 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
     if (parentId != -1) {
       data.iTj_[i] = data.iTj_[parentId] * iTp * T_J;
       data.iXj_[i] = data.iXj_[parentId] * iXp * X_J;
+
+      SpatialTransform Xup = iXp * X_J;
+
+      data.vJ_[i] = data.vJ_[parentId] + data.iXj_[i] * vJ;
     } else {
       data.iTj_[i] = iTp * T_J;
       data.iXj_[i] = iXp * X_J;
+
+      // velocity
+      data.vJ_[i] = Motion::Zero();
     }
   }
 
@@ -70,6 +80,17 @@ inline void getBodyPose(const Model &model, Data &data, size_t bodyId,
   // get the rotation matrix
   R = iXj.block<3, 3>(0, 0);
   p = -unskew(iXj.block<3, 3>(3, 0) * R.transpose());
+}
+
+inline void getBodyTwist(const Model &model, Data &data, size_t bodyId,
+                         Motion &twist) {
+  // get the twist of the body in the world frame
+  auto body = model.bodies_[bodyId];
+
+  auto iXj = data.iXj_[bodyId];
+  auto R = iXj.block<3, 3>(0, 0);
+
+  twist = data.vJ_[bodyId];
 }
 
 // inline void framesForwardKinematics(const Model &model, Data &data,

@@ -9,10 +9,12 @@ public:
     iTj_.resize(model.actuated_joints_.size());
     iXj_.resize(model.actuated_joints_.size());
     iX0_.resize(model.actuated_joints_.size());
+    vJ_.resize(model.actuated_joints_.size());
     for (size_t i = 0; i < model.actuated_joints_.size(); i++) {
       iTj_[i] = Transform::Identity();
       iXj_[i] = SpatialTransform::Identity();
       iX0_[i] = SpatialTransform::Identity();
+      vJ_[i].setZero();
     }
   };
 
@@ -21,7 +23,9 @@ public:
   std::vector<SpatialTransform> iXj_;
 
   std::vector<SpatialTransform> iX0_; // the position of the body frame i
-                                      // relative to the world frame
+  // relative to the world frame
+
+  std::vector<Motion> vJ_; // spatial velocity of the body frame j
 
   // // links with respect to world frame
   // std::vector<Transform> oTb;
