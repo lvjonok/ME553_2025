@@ -23,13 +23,20 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
     auto joint = model.actuated_joints_[i];
     auto body = model.bodies_[i];
 
-    Transform X_J = Transform::Identity();
-    // if (model.gc_idx_[i] != -1) {
-    //   X_J = joint->jcalc(gc, model.gc_idx_[i]);
-    // } else {
-    //   std::cout << "Use identity for joint " << joint->getName() <<
-    //   std::endl;
-    // }
+    Transform T_J = Transform::Identity();
+    SpatialTransform X_J = SpatialTransform::Identity();
+    if (joint->getType() != JointType::FIXED) {
+      // std::cout << "joint " << joint->getName() << " uses gc "
+      //           << gc[model.gc_idx_[i]] << " gv " << gv[model.gv_idx_[i]]
+      //           << std::endl;
+
+      auto res = joint->jcalc(gc, model.gc_idx_[i]);
+      // T_J = joint->jcalcOld(gc, model.gc_idx_[i]);
+
+      X_J = std::get<0>(res);
+    } else {
+      std::cout << "Use identity for joint " << joint->getName() << std::endl;
+    }
     Transform iTp = model.T_T_[i];
     SpatialTransform iXp = model.X_T_[i];
     size_t parentId = model.parents_[i];
@@ -40,8 +47,8 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
     //           << iXp << std::endl;
 
     if (parentId != -1) {
-      data.iTj_[i] = data.iTj_[parentId] * iTp * X_J;
-      data.iXj_[i] = data.iXj_[parentId] * iXp;
+      data.iTj_[i] = data.iTj_[parentId] * iTp * T_J;
+      data.iXj_[i] = data.iXj_[parentId] * iXp * X_J;
     } else {
       data.iTj_[i] = iTp;
       data.iXj_[i] = iXp;
@@ -55,6 +62,10 @@ inline void getBodyPose(const Model &model, Data &data, size_t bodyId,
                         Eigen::Matrix3d &R, Eigen::Vector3d &p) {
   // get the pose of the body in the world frame
   auto body = model.bodies_[bodyId];
+
+  // R = data.iTj_[bodyId].block<3, 3>(0, 0);
+  // p = data.iTj_[bodyId].block<3, 1>(0, 3);
+
   auto iXj = data.iXj_[bodyId];
 
   // get the rotation matrix
