@@ -34,10 +34,10 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
     SpatialTransform iXp = model.X_T_[i];
     size_t parentId = model.parents_[i];
 
-    std::cout << "body " << body->getName() << " iTp:\n"
-              << iTp << "\n "
-              << "iXp:\n"
-              << iXp << std::endl;
+    // std::cout << "body " << body->getName() << " iTp:\n"
+    //           << iTp << "\n "
+    //           << "iXp:\n"
+    //           << iXp << std::endl;
 
     if (parentId != -1) {
       data.iTj_[i] = data.iTj_[parentId] * iTp * X_J;
@@ -59,7 +59,7 @@ inline void getBodyPose(const Model &model, Data &data, size_t bodyId,
 
   // get the rotation matrix
   R = iXj.block<3, 3>(0, 0);
-  p = unskew(iXj.block<3, 3>(3, 0) * R.transpose());
+  p = -unskew(iXj.block<3, 3>(3, 0) * R.transpose());
 }
 
 // inline void framesForwardKinematics(const Model &model, Data &data,
