@@ -14,84 +14,109 @@
 
 namespace algorithms {
 
+// TODO: this is a test, what if we compute the forward kinematics completely
+// bare-bone, directly utilize model and joints and use only vectors and
+// matrices
 inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
                      const Eigen::VectorXd &gv) {
+  Eigen::Vector3d pPosW = Eigen::Vector3d::Zero();
+  Eigen::Matrix3d pRotW = Eigen::Matrix3d::Identity();
   for (size_t i = 0; i < model.nbodies_; i++) {
-    // joint model is identity right now, we don't consider the generalized
-    // coordinate yet
-    auto joint = model.actuated_joints_[i];
-    auto body = model.bodies_[i];
-
-    Transform T_J = Transform::Identity();
-    SpatialTransform X_J = SpatialTransform::Identity();
-    // Eigen::MatrixXd S;
-    Motion vJ = Motion::Zero();
-    if (joint->getType() != JointType::FIXED) {
-      // std::cout << "joint " << joint->getName() << " uses gc "
-      //           << gc[model.gc_idx_[i]] << " gv " << gv[model.gv_idx_[i]]
-      //           << std::endl;
-
-      auto res = joint->jcalc(gc, model.gc_idx_[i], gv, model.gv_idx_[i]);
-      // T_J = joint->jcalcOld(gc, model.gc_idx_[i]);
-
-      X_J = std::get<0>(res);
-      vJ = std::get<1>(res);
-    } else {
-      std::cout << "Use identity for joint " << joint->getName() << std::endl;
-    }
-    Transform iTp = model.T_T_[i];
-    SpatialTransform iXp = model.X_T_[i];
-    size_t parentId = model.parents_[i];
-
-    // std::cout << "body " << body->getName() << " iTp:\n"
-    //           << iTp << "\n "
-    //           << "iXp:\n"
-    //           << iXp << std::endl;
-
+    auto parentId = model.parents_[i];
     if (parentId != -1) {
-      data.iTj_[i] = data.iTj_[parentId] * iTp * T_J;
-      data.iXj_[i] = data.iXj_[parentId] * iXp * X_J;
-
-      SpatialTransform Xup = iXp * X_J;
-
-      data.vJ_[i] = data.vJ_[parentId] + data.iXj_[i] * vJ;
-    } else {
-      data.iTj_[i] = iTp * T_J;
-      data.iXj_[i] = iXp * X_J;
-
-      // velocity
-      data.vJ_[i] = Motion::Zero();
+      pPosW = data.jointPos_W[parentId];
+      pRotW = data.rot_WB[parentId];
     }
-  }
 
-  return;
+    auto joint = model.actuated_joints_[i];
+    // this is the static rotation of the joint from parent body to the child
+    // (joint) frame
+    Eigen::Matrix3d R_PJ = joint->jointPlacement().block<3, 3>(0, 0);
+    Eigen::Vector3d P_PJ = joint->jointPlacement().block<3, 1>(0, 3);
+
+    auto motion = joint->motion(gc, model.gc_idx_[i], joint->gc_length());
+    Eigen::Matrix3d R_J = motion.block<3, 3>(0, 0);
+    Eigen::Vector3d P_J = motion.block<3, 1>(0, 3);
+
+    // perform the transformation
+    data.rot_WB[i] = pRotW * R_PJ * R_J;
+    data.jointPos_W[i] = pPosW + pRotW * (P_PJ + R_PJ * P_J);
+  }
 }
+
+// inline void setState(const Model &model, Data &data, const Eigen::VectorXd
+// &gc,
+//                      const Eigen::VectorXd &gv) {
+//   for (size_t i = 0; i < model.nbodies_; i++) {
+//     // joint model is identity right now, we don't consider the generalized
+//     // coordinate yet
+//     auto joint = model.actuated_joints_[i];
+//     auto body = model.bodies_[i];
+
+//     Transform T_J = Transform::Identity();
+//     SpatialTransform X_J = SpatialTransform::Identity();
+//     // Eigen::MatrixXd S;
+//     Motion vJ = Motion::Zero();
+//     if (joint->getType() != JointType::FIXED) {
+//       // std::cout << "joint " << joint->getName() << " uses gc "
+//       //           << gc[model.gc_idx_[i]] << " gv " <<
+//       gv[model.gv_idx_[i]]
+//       //           << std::endl;
+
+//       auto res = joint->jcalc(gc, model.gc_idx_[i], gv, model.gv_idx_[i]);
+//       // T_J = joint->jcalcOld(gc, model.gc_idx_[i]);
+
+//       X_J = std::get<0>(res);
+//       vJ = std::get<1>(res);
+//     } else {
+//       std::cout << "Use identity for joint " << joint->getName() <<
+//       std::endl;
+//     }
+//     Transform iTp = model.T_T_[i];
+//     SpatialTransform iXp = model.X_T_[i];
+//     size_t parentId = model.parents_[i];
+
+//     // std::cout << "body " << body->getName() << " iTp:\n"
+//     //           << iTp << "\n "
+//     //           << "iXp:\n"
+//     //           << iXp << std::endl;
+
+//     if (parentId != -1) {
+//       data.iTj_[i] = data.iTj_[parentId] * iTp * T_J;
+//       data.iXj_[i] = data.iXj_[parentId] * iXp * X_J;
+
+//       SpatialTransform Xup = iXp * X_J;
+
+//       data.vJ_[i] = data.vJ_[parentId] + data.iXj_[i] * vJ;
+//     } else {
+//       data.iTj_[i] = iTp * T_J;
+//       data.iXj_[i] = iXp * X_J;
+
+//       // velocity
+//       data.vJ_[i] = Motion::Zero();
+//     }
+//   }
+
+//   return;
+// }
 
 inline void getBodyPose(const Model &model, Data &data, size_t bodyId,
                         Eigen::Matrix3d &R, Eigen::Vector3d &p) {
   // get the pose of the body in the world frame
-  auto body = model.bodies_[bodyId];
-
-  // R = data.iTj_[bodyId].block<3, 3>(0, 0);
-  // p = data.iTj_[bodyId].block<3, 1>(0, 3);
-
-  auto iXj = data.iXj_[bodyId];
-
-  // get the rotation matrix
-  R = iXj.block<3, 3>(0, 0);
-  p = -unskew(iXj.block<3, 3>(3, 0) * R.transpose());
+  R = data.rot_WB[bodyId];
+  p = data.jointPos_W[bodyId];
 }
 
-inline void getBodyTwist(const Model &model, Data &data, size_t bodyId,
-                         Motion &twist) {
-  // get the twist of the body in the world frame
-  auto body = model.bodies_[bodyId];
+// inline void getBodyTwist(const Model &model, Data &data, size_t bodyId,
+//                          Motion &twist) {
+//   // get the twist of the body in the world frame
+//   auto body = model.bodies_[bodyId];
 
-  auto iXj = data.iXj_[bodyId];
-  auto R = iXj.block<3, 3>(0, 0);
+//   auto iXj = data.iXj_[bodyId];
+//   auto R = iXj.block<3, 3>(0, 0);
 
-  twist = data.vJ_[bodyId];
-}
+//   twist = data.vJ_[bodyId];
+// }
 
 // inline void framesForwardKinematics(const Model &model, Data &data,
 //                                     const Eigen::VectorXd &gc) {

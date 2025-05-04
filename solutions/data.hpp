@@ -16,6 +16,13 @@ public:
       iX0_[i] = SpatialTransform::Identity();
       vJ_[i].setZero();
     }
+
+    rot_WB.resize(model.actuated_joints_.size());
+    jointPos_W.resize(model.actuated_joints_.size());
+    for (size_t i = 0; i < model.actuated_joints_.size(); i++) {
+      rot_WB[i] = Eigen::Matrix3d::Identity();
+      jointPos_W[i] = Eigen::Vector3d::Zero();
+    }
   };
 
   // the position of the body frame j relative to the joint frame i
@@ -26,6 +33,12 @@ public:
   // relative to the world frame
 
   std::vector<Motion> vJ_; // spatial velocity of the body frame j
+
+  // EVERYTHING IN THE WORLD FRAME BELOW
+  std::vector<Eigen::Matrix3d>
+      rot_WB; // rotation of the body i in the world frame
+  std::vector<Eigen::Vector3d>
+      jointPos_W; // position of the joint i in the world frame
 
   // // links with respect to world frame
   // std::vector<Transform> oTb;

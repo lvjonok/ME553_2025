@@ -300,115 +300,80 @@ public:
   //   // return (XR * XP).inverse();
   // }
 
-  // // TODO: add motion subspace matrix here and everything else
-  // Transform jcalcOld(const Eigen::VectorXd &gc, int start_idx) {
-  //   std::cout << "entering jcalc" << std::endl;
-  //   return motion(gc, start_idx, gc_length());
-  // }
+  // TODO: add motion subspace matrix here and everything else
+  Transform jcalcOld(const Eigen::VectorXd &gc, int start_idx) {
+    std::cout << "entering jcalc" << std::endl;
+    return motion(gc, start_idx, gc_length());
+  }
 
-  // // motionSubspace is the matrix that describes the motion of the joint
-  // // if the joint provides n_f degrees of freedom, the motion subspace
-  // // is a 6xn_f matrix, where n_f is the number of degrees of freedom
-  // Eigen::MatrixXd motionSubspace() {
-  //   if (type_ == JointType::REVOLUTE) {
-  //     Eigen::MatrixXd S(6, 1);
-  //     S.setZero();
-  //     S.head<3>() = axis; // omega
+  // compute the transform due to motion
+  Transform motion(double theta) {
+    Eigen::Matrix3d R;
+    if (type_ == JointType::REVOLUTE) {
+      // TODO: what if axis are not z?
+      // R = RotZ(theta);
+      R = RotAxisAngle(axis, theta);
+    } else if (type_ == JointType::PRISMATIC) {
+      R = Eigen::Matrix3d::Identity();
+    } else if (type_ == JointType::FLOATING) {
+      std::cout << "Should have passed a vector of 7 values" << std::endl;
+      R = Eigen::Matrix3d::Identity();
+    } else {
+      R = Eigen::Matrix3d::Identity();
+    }
 
-  //     return S;
-  //   }
+    Eigen::Vector3d t;
+    if (type_ == JointType::PRISMATIC) {
+      t = axis * theta;
+    } else {
+      t = Eigen::Vector3d::Zero();
+    }
 
-  //   if (type_ == JointType::PRISMATIC) {
-  //     Eigen::MatrixXd S(6, 1);
-  //     S.setZero();
-  //     S.tail<3>() = axis; // v
+    Transform T = Transform::Identity();
+    T.block<3, 3>(0, 0) = R;
+    T.block<3, 1>(0, 3) = t;
+    return T;
+  }
 
-  //     return S;
-  //   }
+  // Motion transformation is defined as a function of generalized
+  // coordinates
+  // we pass the start index and length of the generalized coordinates
+  Transform motion(const Eigen::VectorXd &gc, size_t start_idx, size_t length) {
+    if (start_idx == -1) {
+      return Transform::Identity();
+    }
 
-  //   if (type_ == JointType::FLOATING) {
-  //     Eigen::MatrixXd S(6, 6);
-  //     S.setZero();
-  //     S.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity();
-  //     S.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity();
+    if (length == 1)
+      return motion(gc[start_idx]);
 
-  //     return S;
-  //   }
+    return motion(gc.segment(start_idx, length));
+  }
 
-  //   throw std::runtime_error(
-  //       "Trying to compute motion subspace for a fixed joint or unknown
-  //       type");
-  // }
+  // compute the transform due to motion (for floating body)
+  Transform motion(const Eigen::VectorXd &theta) {
+    auto xyz = theta.head<3>();
+    auto quat = theta.segment<4>(3);
 
-  // // compute the transform due to motion
-  // Transform motion(double theta) {
-  //   Eigen::Matrix3d R;
-  //   if (type_ == JointType::REVOLUTE) {
-  //     // TODO: what if axis are not z?
-  //     // R = RotZ(theta);
-  //     R = RotAxisAngle(axis, theta);
-  //   } else if (type_ == JointType::PRISMATIC) {
-  //     R = Eigen::Matrix3d::Identity();
-  //   } else if (type_ == JointType::FLOATING) {
-  //     std::cout << "Should have passed a vector of 7 values" << std::endl;
-  //     R = Eigen::Matrix3d::Identity();
-  //   } else {
-  //     R = Eigen::Matrix3d::Identity();
-  //   }
+    // convert manually to rotation matrix
+    Eigen::Matrix3d R;
+    R(0, 0) = 1 - 2 * (quat(2) * quat(2) + quat(3) * quat(3));
+    R(0, 1) = 2 * (quat(1) * quat(2) - quat(0) * quat(3));
+    R(0, 2) = 2 * (quat(1) * quat(3) + quat(0) * quat(2));
+    R(1, 0) = 2 * (quat(1) * quat(2) + quat(0) * quat(3));
+    R(1, 1) = 1 - 2 * (quat(1) * quat(1) + quat(3) * quat(3));
+    R(1, 2) = 2 * (quat(2) * quat(3) - quat(0) * quat(1));
+    R(2, 0) = 2 * (quat(1) * quat(3) - quat(0) * quat(2));
+    R(2, 1) = 2 * (quat(2) * quat(3) + quat(0) * quat(1));
+    R(2, 2) = 1 - 2 * (quat(1) * quat(1) + quat(2) * quat(2));
+    // std::cout << "R: " << R << std::endl;
+    // std::cout << "quat: " << quat.transpose() << std::endl;
+    // std::cout << "xyz: " << xyz.transpose() << std::endl;
+    Transform T = Transform::Identity();
+    T.block<3, 3>(0, 0) = R;
+    T.block<3, 1>(0, 3) = xyz;
 
-  //   Eigen::Vector3d t;
-  //   if (type_ == JointType::PRISMATIC) {
-  //     t = axis * theta;
-  //   } else {
-  //     t = Eigen::Vector3d::Zero();
-  //   }
-
-  //   Transform T = Transform::Identity();
-  //   T.block<3, 3>(0, 0) = R;
-  //   T.block<3, 1>(0, 3) = t;
-  //   return T;
-  // }
-
-  // // Motion transformation is defined as a function of generalized
-  // // coordinates
-  // // we pass the start index and length of the generalized coordinates
-  // Transform motion(const Eigen::VectorXd &gc, size_t start_idx, size_t
-  // length) {
-  //   if (start_idx == -1) {
-  //     return Transform::Identity();
-  //   }
-
-  //   if (length == 1)
-  //     return motion(gc[start_idx]);
-
-  //   return motion(gc.segment(start_idx, length));
-  // }
-
-  // // compute the transform due to motion (for floating body)
-  // Transform motion(const Eigen::VectorXd &theta) {
-  //   auto xyz = theta.head<3>();
-  //   auto quat = theta.segment<4>(3);
-
-  //   // convert manually to rotation matrix
-  //   Eigen::Matrix3d R;
-  //   R(0, 0) = 1 - 2 * (quat(2) * quat(2) + quat(3) * quat(3));
-  //   R(0, 1) = 2 * (quat(1) * quat(2) - quat(0) * quat(3));
-  //   R(0, 2) = 2 * (quat(1) * quat(3) + quat(0) * quat(2));
-  //   R(1, 0) = 2 * (quat(1) * quat(2) + quat(0) * quat(3));
-  //   R(1, 1) = 1 - 2 * (quat(1) * quat(1) + quat(3) * quat(3));
-  //   R(1, 2) = 2 * (quat(2) * quat(3) - quat(0) * quat(1));
-  //   R(2, 0) = 2 * (quat(1) * quat(3) - quat(0) * quat(2));
-  //   R(2, 1) = 2 * (quat(2) * quat(3) + quat(0) * quat(1));
-  //   R(2, 2) = 1 - 2 * (quat(1) * quat(1) + quat(2) * quat(2));
-  //   // std::cout << "R: " << R << std::endl;
-  //   // std::cout << "quat: " << quat.transpose() << std::endl;
-  //   // std::cout << "xyz: " << xyz.transpose() << std::endl;
-  //   Transform T = Transform::Identity();
-  //   T.block<3, 3>(0, 0) = R;
-  //   T.block<3, 1>(0, 3) = xyz;
-
-  //   return T;
-  // }
+    return T;
+  }
 
   int gc_length() {
     // return 1;
