@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
     Eigen::Vector4d random_quat = Eigen::Vector4d::Random();
     random_quat.normalize();
     cheetah_gc.segment<4>(3) = random_quat;
-    cheetah_gv.segment<6>(0) = Eigen::VectorXd::Zero(6);
+    // cheetah_gv.segment<6>(0) = Eigen::VectorXd::Zero(6);
     // simulate velocity only for one leg
     // cheetah_gv.segment<9>(9).setZero();
 
@@ -209,17 +209,44 @@ int main(int argc, char *argv[]) {
         // compare the inertia and com of bodies in the world frame
         auto raisimCom = sys->comPos_W[i].e();
         auto modelCom = data.comW[i];
-        std::cout << "Raisim com: " << raisimCom.transpose() << '\n'
-                  << "Model com: " << modelCom.transpose() << '\n';
+        // std::cout << "Raisim com: " << raisimCom.transpose() << '\n'
+        //           << "Model com: " << modelCom.transpose() << '\n';
 
         assert(raisimCom.isApprox(modelCom));
 
         auto raisimInertia = sys->inertia_comW[i].e();
         auto modelInertia = data.inertiaW[i];
 
-        std::cout << "Raisim inertia: " << raisimInertia.transpose() << '\n'
-                  << "Model inertia: " << modelInertia << '\n';
+        // std::cout << "Raisim inertia: " << raisimInertia.transpose() << '\n'
+        //           << "Model inertia: " << modelInertia << '\n'
+        //           << "insertia about joint: "
+        //           << sys->inertiaAboutJoint_W[i].e().transpose() << '\n';
 
+        assert(raisimInertia.isApprox(modelInertia));
+      }
+
+      // for panda there is no sense to compare this
+      if (name != "panda") {
+        // compare composite mass, com and inertia
+        auto raisimM = sys->compositeMass[i];
+        auto raisimCom = sys->composite_com_W[i].e();
+        auto raisimInertia = sys->compositeInertia_W[i].e();
+
+        auto modelM = data.compositeMassW[i];
+        auto modelCom = data.compositeComW[i];
+        auto modelInertia = data.compositeInertiaW[i];
+
+        // std::cout << "Raisim composite mass: " << raisimM << '\n'
+        //           << "Model composite mass: " << modelM << '\n';
+        // std::cout << "Raisim composite com: " << raisimCom.transpose() <<
+        // '\n'
+        //           << "Model composite com: " << modelCom.transpose() << '\n';
+        // std::cout << "Raisim composite inertia: " <<
+        // raisimInertia.transpose()
+        //           << '\n'
+        //           << "Model composite inertia: " << modelInertia << '\n';
+        assert(raisimM == modelM);
+        assert(raisimCom.isApprox(modelCom));
         assert(raisimInertia.isApprox(modelInertia));
       }
     }

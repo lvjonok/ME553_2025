@@ -121,6 +121,59 @@ inline void compositeInertia(const Model &model, Data &data,
 
     data.comW[i] = comW;
   }
+
+  // now we compute the composite bodies
+  data.compositeInertiaW.resize(model.nbodies_);
+  data.compositeMassW.resize(model.nbodies_);
+  data.compositeComW.resize(model.nbodies_);
+  for (int i = model.nbodies_ - 1; i >= 0; i--) {
+    auto link = model.bodies_[i];
+    // properties of the current body
+    data.compositeMassW[i] = link->getMass();
+    data.compositeComW[i] = data.comW[i];
+    data.compositeInertiaW[i] = data.inertiaW[i];
+
+    // propagate to children
+    for (auto childId : model.children_[i]) {
+      // get mass, com and inertia of the child subtree
+      double massChild = data.compositeMassW[childId];
+      Eigen::Vector3d comChild = data.compositeComW[childId];
+      Eigen::Matrix3d inertiaChild = data.compositeInertiaW[childId];
+
+      // get mass, com and inertia of the current body
+      double mass = data.compositeMassW[i];
+      Eigen::Vector3d com = data.compositeComW[i];
+      Eigen::Matrix3d inertia = data.compositeInertiaW[i];
+
+      Eigen::Vector3d comNew =
+          (mass * com + massChild * comChild) / (mass + massChild);
+      Eigen::Vector3d r1 = com - comNew;
+      Eigen::Vector3d r2 = comChild - comNew;
+
+      Eigen::Matrix3d I_new = inertia + inertiaChild -
+                              mass * skew(r1) * skew(r1) -
+                              massChild * skew(r2) * skew(r2);
+
+      // update composite data
+      data.compositeMassW[i] = mass + massChild;
+      data.compositeComW[i] = comNew;
+      data.compositeInertiaW[i] = I_new;
+    }
+  }
+
+  // for floating body system we shift total inertia from com to joint
+  if (model.actuated_joints_[0]->getType() == JointType::FLOATING) {
+    double Mtot = data.compositeMassW[0];
+    Eigen::Vector3d Ctot = data.compositeComW[0];
+    Eigen::Vector3d d0 = Ctot - data.jointPos_W[0]; // world-joint to COM
+    data.compositeInertiaW[0] -= Mtot * skew(d0) * skew(d0);
+  }
+
+  // for a fixed base, first composite inertia is zero
+  if (model.actuated_joints_[0]->getType() != JointType::FLOATING) {
+    data.compositeInertiaW[0] = Eigen::Matrix3d::Zero();
+    data.compositeComW[0] = Eigen::Vector3d::Zero();
+  }
 }
 
 inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
