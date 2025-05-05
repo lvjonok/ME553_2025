@@ -23,8 +23,8 @@ int main(int argc, char *argv[]) {
   // map of robot name → URDF path; comment out entries to disable
   std::map<std::string, std::string> robots = {
       {"cheetah", RESOURCE + "mini_cheetah/urdf/cheetah.urdf"},
-      {"panda", RESOURCE + "Panda/panda.urdf"},
-      {"cart_pole", RESOURCE + "cartPole/doubleCartPole.urdf"},
+      // {"panda", RESOURCE + "Panda/panda.urdf"},
+      // {"cart_pole", RESOURCE + "cartPole/doubleCartPole.urdf"},
   };
 
   std::map<std::string, std::tuple<Eigen::VectorXd, Eigen::VectorXd>> robotData;
@@ -248,6 +248,14 @@ int main(int argc, char *argv[]) {
         assert(raisimM == modelM);
         assert(raisimCom.isApprox(modelCom));
         assert(raisimInertia.isApprox(modelInertia));
+      }
+
+      if (name != "panda") {
+        // compare the mass matrix
+        auto raisimMassMatrix = sys->getMassMatrix().e();
+        std::cout << "Raisim mass matrix:\n"
+                  << raisimMassMatrix.block<6, 6>(0, 0) << '\n';
+        algorithms::crba(model, data, gc);
       }
     }
   };

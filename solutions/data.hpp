@@ -66,6 +66,9 @@ public:
   std::vector<Eigen::Vector3d> compositeComW;
   std::vector<double> compositeMassW;
 
+  // crba
+  Eigen::MatrixXd massMatrix; // mass matrix
+
   // // links with respect to world frame
   // std::vector<Transform> oTb;
 

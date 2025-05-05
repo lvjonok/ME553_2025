@@ -176,6 +176,35 @@ inline void compositeInertia(const Model &model, Data &data,
   }
 }
 
+inline Eigen::Matrix<double, 6, 6> spatialInertia(const Model &model,
+                                                  Data &data, size_t bodyId) {
+  // this function should be called after composite inertia update
+  Eigen::Matrix<double, 6, 6> spatialI;
+  spatialI.setZero();
+
+  Eigen::Vector3d r_ac = data.compositeComW[bodyId] - data.jointPos_W[bodyId];
+  auto m = data.compositeMassW[bodyId];
+  auto I = data.compositeInertiaW[bodyId];
+
+  // fill the inertia matrix
+  spatialI.block<3, 3>(0, 0) = m * Eigen::Matrix3d::Identity();
+  spatialI.block<3, 3>(0, 3) = -skew(r_ac) * m;
+  spatialI.block<3, 3>(3, 0) = skew(r_ac) * m;
+  spatialI.block<3, 3>(3, 3) = I;
+
+  return spatialI;
+}
+
+inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
+  // this function should be called after composite inertia update
+  data.massMatrix.resize(model.gv_size_, model.gv_size_);
+  data.massMatrix.setZero();
+
+  // // try computing the spatial inertia for the floating base
+  // std::cout << "spatial inertia for the floating base" << std::endl;
+  // std::cout << spatialInertia(model, data, 0).matrix() << std::endl;
+}
+
 inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
                      const Eigen::VectorXd &gv) {
   forwardPosition(model, data, gc);
