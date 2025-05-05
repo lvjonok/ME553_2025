@@ -14,11 +14,8 @@
 
 namespace algorithms {
 
-// TODO: this is a test, what if we compute the forward kinematics completely
-// bare-bone, directly utilize model and joints and use only vectors and
-// matrices
-inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
-                     const Eigen::VectorXd &gv) {
+inline void forwardPosition(const Model &model, Data &data,
+                            const Eigen::VectorXd &gc) {
   Eigen::Vector3d pPosW = Eigen::Vector3d::Zero();
   Eigen::Matrix3d pRotW = Eigen::Matrix3d::Identity();
   for (size_t i = 0; i < model.nbodies_; i++) {
@@ -43,7 +40,11 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
     data.jointPos_W[i] = pPosW + pRotW * (P_PJ + R_PJ * P_J);
     data.jointAxis_W[i] = data.rot_WB[i] * joint->getAxis();
   }
+}
 
+inline void forwardVelocity(const Model &model, Data &data,
+                            const Eigen::VectorXd &gc,
+                            const Eigen::VectorXd &gv) {
   // calculate the velocity of the body
   for (size_t i = 0; i < model.nbodies_; i++) {
     Eigen::Vector3d v, w;
@@ -87,6 +88,12 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
     data.bodyLinVel_w[i] = v;
     data.bodyAngVel_w[i] = w;
   }
+}
+
+inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
+                     const Eigen::VectorXd &gv) {
+  forwardPosition(model, data, gc);
+  forwardVelocity(model, data, gc, gv);
 }
 
 //   data.inertiaW.resize(model.links_.size());
