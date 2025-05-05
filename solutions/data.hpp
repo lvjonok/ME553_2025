@@ -22,12 +22,14 @@ public:
     jointAxis_W.resize(model.actuated_joints_.size());
     bodyLinVel_w.resize(model.actuated_joints_.size());
     bodyAngVel_w.resize(model.actuated_joints_.size());
+    joint2joint_W.resize(model.actuated_joints_.size());
     for (size_t i = 0; i < model.actuated_joints_.size(); i++) {
       rot_WB[i] = Eigen::Matrix3d::Identity();
       jointPos_W[i] = Eigen::Vector3d::Zero();
       jointAxis_W[i] = Eigen::Vector3d::Zero();
       bodyLinVel_w[i] = Eigen::Vector3d::Zero();
       bodyAngVel_w[i] = Eigen::Vector3d::Zero();
+      joint2joint_W[i] = Eigen::Vector3d::Zero();
     }
   };
 
@@ -46,6 +48,8 @@ public:
   std::vector<Eigen::Vector3d>
       jointPos_W; // position of the joint i in the world frame
   std::vector<Eigen::Vector3d> jointAxis_W; // axis of the joint i in the world
+  // vector between the joint i and its parent joint in the world frame
+  std::vector<Eigen::Vector3d> joint2joint_W;
 
   // velocities
   std::vector<Eigen::Vector3d> bodyLinVel_w; // linear velocity of the body

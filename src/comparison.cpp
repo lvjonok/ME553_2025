@@ -45,11 +45,17 @@ int main(int argc, char *argv[]) {
 
   {
     Eigen::VectorXd cheetah_gc = 0.5 * Eigen::VectorXd::Random(19);
-    Eigen::VectorXd cheetah_gv = 0.9 * Eigen::VectorXd::Random(18);
+    Eigen::VectorXd cheetah_gv = 0.1 * Eigen::VectorXd::Random(18);
 
     Eigen::Vector4d random_quat = Eigen::Vector4d::Random();
     random_quat.normalize();
     cheetah_gc.segment<4>(3) = random_quat;
+    cheetah_gv.segment<6>(0) = Eigen::VectorXd::Zero(6);
+    // simulate velocity only for one leg
+    // cheetah_gv.segment<9>(9).setZero();
+
+    std::cout << "Cheetah gc: " << cheetah_gc.transpose() << '\n';
+    std::cout << "Cheetah gv: " << cheetah_gv.transpose() << '\n';
 
     robotData["cheetah"] = std::make_tuple(cheetah_gc, cheetah_gv);
   }
@@ -126,12 +132,12 @@ int main(int argc, char *argv[]) {
       std::cout << "Body " << i << ": " << sys->getBodyNames()[i] << " "
                 << model.bodies_[i]->getName() << '\n';
 
-      std::cout << "Raisim T:\n"
-                << raisimR << "\n"
-                << raisimP << "\n"
-                << "Model T:\n"
-                << modelR << "\n"
-                << modelP << "\n";
+      // std::cout << "Raisim T:\n"
+      //           << raisimR << "\n"
+      //           << raisimP << "\n"
+      //           << "Model T:\n"
+      //           << modelR << "\n"
+      //           << modelP << "\n";
 
       assert(raisimR.e().isApprox(modelR));
       assert(raisimP.e().isApprox(modelP));
@@ -147,21 +153,40 @@ int main(int argc, char *argv[]) {
       //           << model.actuated_joints_[i]->getAxis().transpose() << '\n';
       assert(raisimAxis.isApprox(modelAxis));
 
+      // compare joint2joint in the world frame
+      {
+        auto raisimJoint2Joint = sys->joint2joint_W[i].e();
+        // std::cout << "Raisim joint2joint: " << raisimJoint2Joint.transpose()
+        //           << '\n';
+        // std::cout << "Model joint2joint: " <<
+        // data.joint2joint_W[i].transpose()
+        //           << '\n';
+        assert(raisimJoint2Joint.isApprox(data.joint2joint_W[i]));
+      }
+
       // compare body velocities
-      // sys->getVelocity(i, raisimLinVel);
-      // sys->getAngularVelocity(i, raisimAngVel);
-      sys->getFrameVelocity(i, raisimLinVel);
-      sys->getFrameAngularVelocity(i, raisimAngVel);
+      sys->getVelocity(i, raisimLinVel);
+      sys->getAngularVelocity(i, raisimAngVel);
 
       // get the twist of the body in the world frame
       algorithms::getBodyTwist(model, data, i, modelLinVel, modelAngVel);
 
-      std::cout << "Raisim velocity: " << raisimAngVel.e().transpose() << ' '
-                << raisimLinVel.e().transpose() << '\n'
-                << "Model velocity: " << modelAngVel.transpose() << ' '
-                << modelLinVel.transpose() << '\n';
-      // assert(raisimLinVel.e().isApprox(modelLinVel));
-      // assert(raisimAngVel.e().isApprox(modelAngVel));
+      // std::cout << "Raisim velocity: " << raisimAngVel.e().transpose() << ' '
+      //           << raisimLinVel.e().transpose() << '\n'
+      //           << "Model velocity: " << modelAngVel.transpose() << ' '
+      //           << modelLinVel.transpose() << '\n';
+      assert(raisimLinVel.e().isApprox(modelLinVel));
+      assert(raisimAngVel.e().isApprox(modelAngVel));
+
+      // auto raisimMassMatrix = sys->getMassMatrix();
+
+      // // check that we have parsed the same inertia for each body(links)
+      // auto raisimInertia = sys->getInertia()[i].e();
+      // auto modelInertia = model.bodies_[i]->getInertia();
+
+      // std::cout << "Raisim inertia: " << raisimInertia.transpose() << '\n'
+      //           << "Model inertia: " << modelInertia << '\n';
+      // assert(raisimInertia.isApprox(modelInertia));
 
       // // compare the inertia and com of bodies in the world frame
       // auto raisimCom = sys->comPos_W[i].e();

@@ -39,12 +39,19 @@ inline void forwardPosition(const Model &model, Data &data,
     data.rot_WB[i] = pRotW * R_PJ * R_J;
     data.jointPos_W[i] = pPosW + pRotW * (P_PJ + R_PJ * P_J);
     data.jointAxis_W[i] = data.rot_WB[i] * joint->getAxis();
+
+    if (parentId != -1) {
+      data.joint2joint_W[i] = data.jointPos_W[i] - data.jointPos_W[parentId];
+    }
   }
 }
 
 inline void forwardVelocity(const Model &model, Data &data,
                             const Eigen::VectorXd &gc,
                             const Eigen::VectorXd &gv) {
+  data.bodyLinVel_w.resize(model.nbodies_);
+  data.bodyAngVel_w.resize(model.nbodies_);
+
   // calculate the velocity of the body
   for (size_t i = 0; i < model.nbodies_; i++) {
     Eigen::Vector3d v, w;
@@ -54,17 +61,10 @@ inline void forwardVelocity(const Model &model, Data &data,
     auto parentId = model.parents_[i];
     if (parentId != -1) {
       w = data.bodyAngVel_w[parentId];
-      v = data.bodyLinVel_w[parentId] +
-          w.cross(data.jointPos_W[i] - data.jointPos_W[parentId]);
-    }
-
-    if (model.gv_idx_[i] == -1) {
-      std::cout << "Joint " << i << " is not actuated, skipping...\n";
-      continue;
+      v = data.bodyLinVel_w[parentId] + w.cross(data.joint2joint_W[i]);
     }
 
     auto joint = model.actuated_joints_[i];
-    Eigen::Vector3d P_PJ = joint->jointPlacement().block<3, 1>(0, 3);
 
     switch (joint->getType()) {
     case JointType::FIXED:
@@ -72,8 +72,8 @@ inline void forwardVelocity(const Model &model, Data &data,
       break;
     case JointType::FLOATING:
       // floating joint, we have to set the velocity
-      data.bodyLinVel_w[i] = gv.segment(0, 3);
-      data.bodyAngVel_w[i] = gv.segment(3, 3);
+      v = gv.segment(0, 3);
+      w = gv.segment(3, 3);
       break;
     case JointType::REVOLUTE:
       // revolute joint, we have to set the angular velocity
