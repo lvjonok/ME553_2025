@@ -178,27 +178,31 @@ int main(int argc, char *argv[]) {
       assert(raisimLinVel.e().isApprox(modelLinVel));
       assert(raisimAngVel.e().isApprox(modelAngVel));
 
-      // auto raisimMassMatrix = sys->getMassMatrix();
+      auto raisimMassMatrix = sys->getMassMatrix();
 
-      // // check that we have parsed the same inertia for each body(links)
-      // auto raisimInertia = sys->getInertia()[i].e();
-      // auto modelInertia = model.bodies_[i]->getInertia();
+      {
+        // compare that we have parsed the inertia correctly
+        auto raisimInertia = sys->getInertia()[i].e();
+        auto modelInertia = model.bodies_[i]->getInertia();
+      }
 
-      // std::cout << "Raisim inertia: " << raisimInertia.transpose() << '\n'
-      //           << "Model inertia: " << modelInertia << '\n';
-      // assert(raisimInertia.isApprox(modelInertia));
+      {
+        // compare the inertia and com of bodies in the world frame
+        auto raisimCom = sys->comPos_W[i].e();
+        auto modelCom = data.comW[i];
+        std::cout << "Raisim com: " << raisimCom.transpose() << '\n'
+                  << "Model com: " << modelCom.transpose() << '\n';
 
-      // // compare the inertia and com of bodies in the world frame
-      // auto raisimCom = sys->comPos_W[i].e();
-      // auto modelCom = data.comW[i];
-      // std::cout << "Raisim com: " << raisimCom.transpose() << '\n'
-      //           << "Model com: " << modelCom.transpose() << '\n';
+        assert(raisimCom.isApprox(modelCom));
 
-      // auto raisimInertia = sys->inertia_comW[i].e();
-      // auto modelInertia = data.inertiaW[i];
+        auto raisimInertia = sys->inertia_comW[i].e();
+        auto modelInertia = data.inertiaW[i];
 
-      // std::cout << "Raisim inertia: " << raisimInertia.transpose() << '\n'
-      //           << "Model inertia: " << modelInertia << '\n';
+        std::cout << "Raisim inertia: " << raisimInertia.transpose() << '\n'
+                  << "Model inertia: " << modelInertia << '\n';
+
+        assert(raisimInertia.isApprox(modelInertia));
+      }
     }
   };
 

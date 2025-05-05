@@ -90,10 +90,44 @@ inline void forwardVelocity(const Model &model, Data &data,
   }
 }
 
+inline void compositeInertia(const Model &model, Data &data,
+                             const Eigen::VectorXd &gc) {
+  // first, update the com and inertia in the world frame
+  data.inertiaW.resize(model.nbodies_);
+  data.comW.resize(model.nbodies_);
+
+  for (size_t i = 0; i < model.nbodies_; i++) {
+    auto link = model.bodies_[i];
+    auto inertia = link->getInertia();
+
+    Eigen::Matrix3d R_BC = link->getTransform().block<3, 3>(0, 0);
+
+    Eigen::Matrix3d worldInertia = data.rot_WB[i] * R_BC * inertia *
+                                   R_BC.transpose() *
+                                   data.rot_WB[i].transpose();
+
+    // TODO: likely there is just a problem with all the loops
+    // the iteration is weird and I end up with this stuff
+    // just because first body is fixed in the fixed-based robots
+    // raisim has zero inertia for them.
+    if (i == 0 && model.actuated_joints_[i]->getType() != JointType::FLOATING) {
+      worldInertia = Eigen::Matrix3d::Zero();
+    }
+    data.inertiaW[i] = worldInertia;
+
+    // find the center of mass in the world frame
+    Eigen::Vector3d com = link->getTransform().block<3, 1>(0, 3);
+    Eigen::Vector3d comW = data.jointPos_W[i] + data.rot_WB[i] * R_BC * com;
+
+    data.comW[i] = comW;
+  }
+}
+
 inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
                      const Eigen::VectorXd &gv) {
   forwardPosition(model, data, gc);
   forwardVelocity(model, data, gc, gv);
+  compositeInertia(model, data, gc);
 }
 
 //   data.inertiaW.resize(model.links_.size());
