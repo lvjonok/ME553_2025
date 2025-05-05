@@ -89,6 +89,25 @@ int main(int argc, char *argv[]) {
     // compare joint counts
     assert(sys->getNumberOfJoints() == model.actuated_joints_.size());
 
+    {
+      // compare children_ array
+      assert(sys->children_.size() == model.children_.size());
+      for (size_t i = 0; i < sys->children_.size(); ++i) {
+        // std::cout << "Children of body " << i << ": ";
+        assert(sys->children_[i].size() == model.children_[i].size());
+        for (size_t j = 0; j < sys->children_[i].size(); ++j) {
+          // std::cout << sys->children_[i][j] << ' ';
+          assert(sys->children_[i][j] == model.children_[i][j]);
+        }
+        // std::cout << "\nModel children of body " << i << ": ";
+        for (size_t j = 0; j < model.children_[i].size(); ++j) {
+          // std::cout << model.children_[i][j] << ' ';
+          assert(sys->children_[i][j] == model.children_[i][j]);
+        }
+        // std::cout << '\n';
+      }
+    }
+
     // std::cout << "Model gc indices:\n";
     // for (auto gcIdx :
     //      sys->getMappingFromBodyIndexToGeneralizedCoordinateIndex()) {

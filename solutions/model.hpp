@@ -529,12 +529,27 @@ public:
     nbodies_ = bodies_.size();
     for (size_t i = 0; i < nbodies_; i++) {
       auto link = bodies_[i];
+      link->setIndex(i);
       std::cout << "link name: " << link->getName() << std::endl;
     }
     std::cout << "printing actuated joints in order" << std::endl;
     for (size_t i = 0; i < actuated_joints_.size(); i++) {
       auto joint = actuated_joints_[i];
       std::cout << "joint name: " << joint->getName() << std::endl;
+    }
+    children_.clear();
+    for (size_t i = 0; i < nbodies_; i++) {
+      auto bodyi = bodies_[i];
+      std::vector<size_t> bodyi_children;
+
+      for (auto joint : actuated_joints_) {
+        if (joint->parent != bodyi) {
+          continue;
+        }
+
+        bodyi_children.push_back(joint->child->getIndex());
+      }
+      children_.push_back(bodyi_children);
     }
 
     // now as we have parsed everything, we can set the tree transformation
@@ -844,6 +859,7 @@ public:
   int nbodies_;
   // an array of parent indices, size of Nbodies
   std::vector<size_t> parents_;
+  std::vector<std::vector<size_t>> children_;
   // an array of joints, size of Nbodies
   std::vector<std::shared_ptr<Joint>> actuated_joints_;
   std::vector<std::shared_ptr<Link>> bodies_;
