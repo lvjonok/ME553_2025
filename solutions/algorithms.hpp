@@ -45,46 +45,69 @@ inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
   }
 
   // calculate the velocity of the body
-  Eigen::Vector3d pVelW = Eigen::Vector3d::Zero();
-  Eigen::Vector3d pAngVelW = Eigen::Vector3d::Zero();
   for (size_t i = 0; i < model.nbodies_; i++) {
+    Eigen::Vector3d v, w;
+    v.setZero();
+    w.setZero();
+
     auto parentId = model.parents_[i];
     if (parentId != -1) {
-      pVelW = data.bodyLinVel_w[parentId];
-      pAngVelW = data.bodyAngVel_w[parentId];
+      w = data.bodyAngVel_w[parentId];
+      v = data.bodyLinVel_w[parentId] +
+          w.cross(data.jointPos_W[i] - data.jointPos_W[parentId]);
     }
 
     if (model.gv_idx_[i] == -1) {
       std::cout << "Joint " << i << " is not actuated, skipping...\n";
-      data.bodyLinVel_w[i] = pVelW;
-      data.bodyAngVel_w[i] = pAngVelW;
       continue;
     }
 
     auto joint = model.actuated_joints_[i];
-    auto r = data.jointPos_W[i];
-    if (parentId != 1) {
-      r = data.jointPos_W[i] - data.jointPos_W[parentId];
-    }
     Eigen::Vector3d P_PJ = joint->jointPlacement().block<3, 1>(0, 3);
-    if (joint->getType() == JointType::PRISMATIC) {
-      // for linear joint we only contribute to the linear velocity
-      data.bodyLinVel_w[i] = pVelW + pAngVelW.cross(r) +
-                             data.jointAxis_W[i] * gv[model.gv_idx_[i]];
-      data.bodyAngVel_w[i] = pAngVelW;
-    } else if (joint->getType() == JointType::REVOLUTE) {
-      // for revolute joint we only contribute to the angular velocity
-      data.bodyAngVel_w[i] =
-          pAngVelW + data.jointAxis_W[i] * gv[model.gv_idx_[i]];
-      data.bodyLinVel_w[i] = pVelW;
-      data.bodyLinVel_w[i] += pAngVelW.cross(r);
-    } else {
-      // for floating joint we contribute to both linear and angular velocity
+
+    switch (joint->getType()) {
+    case JointType::FIXED:
+      // do nothing
+      break;
+    case JointType::FLOATING:
+      // floating joint, we have to set the velocity
       data.bodyLinVel_w[i] = gv.segment(0, 3);
       data.bodyAngVel_w[i] = gv.segment(3, 3);
+      break;
+    case JointType::REVOLUTE:
+      // revolute joint, we have to set the angular velocity
+      w += data.jointAxis_W[i] * gv[model.gv_idx_[i]];
+      break;
+    case JointType::PRISMATIC:
+      // prismatic joint, we have to set the linear velocity
+      v += data.jointAxis_W[i] * gv[model.gv_idx_[i]];
+      break;
     }
+
+    data.bodyLinVel_w[i] = v;
+    data.bodyAngVel_w[i] = w;
   }
 }
+
+//   data.inertiaW.resize(model.links_.size());
+//   data.comW.resize(model.links_.size());
+
+//   // find bodies Inertia expressed in the world frame
+//   for (size_t i = 0; i < model.links_.size(); i++) {
+//     auto link = model.links_[i];
+//     auto inertia = link->getInertia();
+
+//     auto worldInertia = data.oTb[i].block<3, 3>(0, 0) * inertia *
+//                         data.oTb[i].block<3, 3>(0, 0).transpose();
+
+//     data.inertiaW[i] = worldInertia;
+
+//     // find the center of mass in the world frame
+//     Transform com = link->getTransform();
+//     Transform comW = data.oTb[i] * com;
+
+//     data.comW[i] = comW; //.block<3, 1>(0, 3);
+//   }
 
 // inline void setState(const Model &model, Data &data, const Eigen::VectorXd
 // &gc,

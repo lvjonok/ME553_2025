@@ -51,6 +51,17 @@ public:
   std::vector<Eigen::Vector3d> bodyLinVel_w; // linear velocity of the body
   std::vector<Eigen::Vector3d> bodyAngVel_w; // angular velocity of the body
 
+  // dynamic quantities
+  std::vector<Eigen::Matrix3d>
+      inertiaW; // inertia of the body i in the world frame
+  std::vector<Eigen::Vector3d>
+      comW; // center of mass of the body i in the world frame
+
+  // composite mass, com and inertia of i-th composite body in the world frame
+  std::vector<Eigen::Matrix3d> compositeInertiaW;
+  std::vector<Eigen::Vector3d> compositeComW;
+  std::vector<double> compositeMassW;
+
   // // links with respect to world frame
   // std::vector<Transform> oTb;
 
