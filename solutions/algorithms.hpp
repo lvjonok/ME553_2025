@@ -209,7 +209,14 @@ inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
   data.massMatrix.resize(model.gv_size_, model.gv_size_);
   data.massMatrix.setZero();
 
-  for (int j = model.nbodies_ - 1; j >= 0; --j) {
+  // for floating base system we iterate to the root (0),
+  // for fixed only till (1)
+  int root = 0;
+  if (model.actuated_joints_[0]->getType() != JointType::FLOATING) {
+    root = 1;
+  }
+
+  for (int j = model.nbodies_ - 1; j >= root; --j) {
     // get current subspce motion and composite spatial inertia
     auto Sj = data.motionSubspace[j];            // 6xjoint_dof
     auto Isp = data.spatialCompositeInertia6[j]; // 6x6
@@ -228,7 +235,7 @@ inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
 
     // walk up the tree for off-diagonal entries
     int k = j;
-    while (model.parents_[k] != -1) {
+    while (model.parents_[k] != root - 1) {
       int a = model.parents_[k];
 
       // child to parent vector

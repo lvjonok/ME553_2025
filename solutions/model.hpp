@@ -491,7 +491,7 @@ public:
       return;
     }
 
-    std::cout << "root link: " << rootLink->getName() << std::endl;
+    // std::cout << "root link: " << rootLink->getName() << std::endl;
 
     // if rootLink is "world", we have a fixed-base robot
     // otherwise, we have a floating base robot and need to manually add
@@ -500,13 +500,13 @@ public:
     bool isFixedBase = true;
 
     if (rootLink->getName() != "world") {
-      std::cout << "We have a floating base robot" << std::endl;
-      std::cout << "Adding floating joint and world under the hood"
-                << std::endl;
+      // std::cout << "We have a floating base robot" << std::endl;
+      // std::cout << "Adding floating joint and world under the hood"
+      //           << std::endl;
 
       // make a dummy world link
       auto worldLink = std::make_shared<Link>("world");
-      std::cout << "worldLink: " << worldLink->getName() << std::endl;
+      // std::cout << "worldLink: " << worldLink->getName() << std::endl;
       auto floatingJoint = std::make_shared<Joint>(
           worldLink, rootLink, Eigen::Vector3d(0, 0, 0),
           Eigen::Vector3d(0, 0, 0), Eigen::Vector3d(0, 0, 0),
@@ -525,18 +525,18 @@ public:
     parents_.clear();
     traverse(links_[0], -1);
 
-    std::cout << "printing bodies and actuated joints in order" << std::endl;
+    // std::cout << "printing bodies and actuated joints in order" << std::endl;
     nbodies_ = bodies_.size();
     for (size_t i = 0; i < nbodies_; i++) {
       auto link = bodies_[i];
       link->setIndex(i);
-      std::cout << "link name: " << link->getName() << std::endl;
+      // std::cout << "link name: " << link->getName() << std::endl;
     }
-    std::cout << "printing actuated joints in order" << std::endl;
-    for (size_t i = 0; i < actuated_joints_.size(); i++) {
-      auto joint = actuated_joints_[i];
-      std::cout << "joint name: " << joint->getName() << std::endl;
-    }
+    // std::cout << "printing actuated joints in order" << std::endl;
+    // for (size_t i = 0; i < actuated_joints_.size(); i++) {
+    //   auto joint = actuated_joints_[i];
+    //   std::cout << "joint name: " << joint->getName() << std::endl;
+    // }
     children_.clear();
     for (size_t i = 0; i < nbodies_; i++) {
       auto bodyi = bodies_[i];
