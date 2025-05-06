@@ -258,6 +258,8 @@ int main(int argc, char *argv[]) {
       std::cout << "Raisim mass matrix last entry:\n"
                 << raisimMassMatrix << '\n';
       algorithms::crba(model, data, gc);
+      assert(raisimMassMatrix.isApprox(data.massMatrix));
+      std::cout << "crba matched\n";
     }
   };
 
