@@ -74,14 +74,23 @@ inline void forwardVelocity(const Model &model, Data &data,
       // floating joint, we have to set the velocity
       v = gv.segment(0, 3);
       w = gv.segment(3, 3);
+      // TODO: find out what kind of motion subspace we have
+      // likely it is simply the identity matrix
+      data.motionSubspace[i] = Eigen::MatrixXd::Identity(6, 6);
       break;
     case JointType::REVOLUTE:
       // revolute joint, we have to set the angular velocity
       w += data.jointAxis_W[i] * gv[model.gv_idx_[i]];
+      // find the motion subspace in the world frame
+      data.motionSubspace[i] = Eigen::VectorXd::Zero(6);
+      data.motionSubspace[i].block<3, 1>(3, 0) = data.jointAxis_W[i];
       break;
     case JointType::PRISMATIC:
       // prismatic joint, we have to set the linear velocity
       v += data.jointAxis_W[i] * gv[model.gv_idx_[i]];
+      // find the motion subspace in the world frame
+      data.motionSubspace[i] = Eigen::VectorXd::Zero(6);
+      data.motionSubspace[i].block<3, 1>(0, 0) = data.jointAxis_W[i];
       break;
     }
 
@@ -174,25 +183,22 @@ inline void compositeInertia(const Model &model, Data &data,
     data.compositeInertiaW[0] = Eigen::Matrix3d::Zero();
     data.compositeComW[0] = Eigen::Vector3d::Zero();
   }
-}
 
-inline Eigen::Matrix<double, 6, 6> spatialInertia(const Model &model,
-                                                  Data &data, size_t bodyId) {
-  // this function should be called after composite inertia update
-  Eigen::Matrix<double, 6, 6> spatialI;
-  spatialI.setZero();
+  data.spatialCompositeInertia6.resize(model.nbodies_);
+  for (size_t i = 0; i < model.nbodies_; i++) {
+    auto m = data.compositeMassW[i];
+    Eigen::Matrix3d I = data.compositeInertiaW[i];
+    Eigen::Vector3d r_ac = (data.compositeComW[i] - data.jointPos_W[i]);
 
-  Eigen::Vector3d r_ac = data.compositeComW[bodyId] - data.jointPos_W[bodyId];
-  auto m = data.compositeMassW[bodyId];
-  auto I = data.compositeInertiaW[bodyId];
+    // fill the inertia matrix
+    Eigen::MatrixXd sI = Eigen::Matrix<double, 6, 6>::Zero();
+    sI.block<3, 3>(0, 0) = m * Eigen::Matrix3d::Identity();
+    sI.block<3, 3>(0, 3) = -skew(r_ac) * m;
+    sI.block<3, 3>(3, 0) = skew(r_ac) * m;
+    sI.block<3, 3>(3, 3) = I; // - m * skew(r_ac) * skew(r_ac);
 
-  // fill the inertia matrix
-  spatialI.block<3, 3>(0, 0) = m * Eigen::Matrix3d::Identity();
-  spatialI.block<3, 3>(0, 3) = -skew(r_ac) * m;
-  spatialI.block<3, 3>(3, 0) = skew(r_ac) * m;
-  spatialI.block<3, 3>(3, 3) = I;
-
-  return spatialI;
+    data.spatialCompositeInertia6[i] = sI;
+  }
 }
 
 inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
@@ -203,6 +209,55 @@ inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
   // // try computing the spatial inertia for the floating base
   // std::cout << "spatial inertia for the floating base" << std::endl;
   // std::cout << spatialInertia(model, data, 0).matrix() << std::endl;
+
+  // {
+  //   auto bodyI = model.nbodies_ - 2;
+  //   Eigen::MatrixXd sI = data.motionSubspace[bodyI];
+
+  //   auto bodyJ = model.nbodies_ - 2;
+  //   Eigen::MatrixXd sJ = data.motionSubspace[bodyJ];
+
+  //   std::cout << "subspace motion" << std::endl;
+  //   std::cout << "sI: " << sI.transpose() << std::endl;
+
+  //   auto inertiaI = data.spatialCompositeInertia6[bodyI];
+  //   auto r_ac = data.compositeComW[bodyI] - data.jointPos_W[bodyJ];
+  //   Eigen::MatrixXd Ir = Eigen::MatrixXd::Identity(6, 6);
+  //   Ir.block<3, 3>(0, 3) = -skew(r_ac);
+
+  //   auto entry = sJ.transpose() * inertiaI * Ir * sI;
+  //   std::cout << "entry: " << entry << std::endl;
+  // }
+
+  for (size_t i = model.nbodies_ - 1; i > 1; i--) {
+    Eigen::MatrixXd sI = data.motionSubspace[i];
+    auto inertiaI = data.spatialCompositeInertia6[i];
+    auto r_ac = data.compositeComW[i] - data.jointPos_W[i];
+
+    auto gv_col = model.gv_idx_[i];
+
+    Eigen::MatrixXd Ir = Eigen::MatrixXd::Identity(6, 6);
+    Ir.block<3, 3>(0, 3) = -skew(r_ac);
+
+    // fill-in diagonal entry
+    // TODO: we have to make something clever with the floating base
+    data.massMatrix.block<1, 1>(gv_col, gv_col) =
+        sI.transpose() * inertiaI * Ir * sI;
+
+    auto j = i;
+    while (model.parents_[j] != 0) {
+      j = model.parents_[j];
+      auto gv_row = model.gv_idx_[j];
+
+      auto sJ = data.motionSubspace[j];
+      data.massMatrix.block<1, 1>(gv_row, gv_col) =
+          sJ.transpose() * inertiaI * Ir * sI;
+    }
+  }
+
+  std::cout << "mass matrix:\n" << data.massMatrix << std::endl;
+
+  return;
 }
 
 inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,

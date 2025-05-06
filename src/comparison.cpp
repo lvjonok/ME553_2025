@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
   }
 
   {
-    Eigen::VectorXd cheetah_gc = 0.5 * Eigen::VectorXd::Random(19);
+    Eigen::VectorXd cheetah_gc = 0.4 * Eigen::VectorXd::Random(19);
     Eigen::VectorXd cheetah_gv = 0.1 * Eigen::VectorXd::Random(18);
 
     Eigen::Vector4d random_quat = Eigen::Vector4d::Random();
@@ -71,7 +71,9 @@ int main(int argc, char *argv[]) {
     Eigen::VectorXd gc = std::get<0>(robotData[name]);
     Eigen::VectorXd gv = std::get<1>(robotData[name]);
     sys->setState(gc, gv);
+    auto raisimMassMatrix = sys->getMassMatrix().e();
     algorithms::setState(model, data, gc, gv);
+    algorithms::crba(model, data, gc);
 
     // // print Raisim info
     // std::cout << "Raisim parent array:\n";
@@ -249,14 +251,13 @@ int main(int argc, char *argv[]) {
         assert(raisimCom.isApprox(modelCom));
         assert(raisimInertia.isApprox(modelInertia));
       }
+    }
+    if (name != "panda") {
+      // compare the mass matrix
 
-      if (name != "panda") {
-        // compare the mass matrix
-        auto raisimMassMatrix = sys->getMassMatrix().e();
-        std::cout << "Raisim mass matrix:\n"
-                  << raisimMassMatrix.block<6, 6>(0, 0) << '\n';
-        algorithms::crba(model, data, gc);
-      }
+      std::cout << "Raisim mass matrix last entry:\n"
+                << raisimMassMatrix << '\n';
+      algorithms::crba(model, data, gc);
     }
   };
 
