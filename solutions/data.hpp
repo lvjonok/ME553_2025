@@ -64,6 +64,7 @@ public:
       inertiaW; // inertia of the body i in the world frame
   std::vector<Eigen::Vector3d>
       comW; // center of mass of the body i in the world frame
+  std::vector<Eigen::MatrixXd> spatialInertia6; // spatial inertia of the body i
 
   // composite mass, com and inertia of i-th composite body in the world frame
   std::vector<Eigen::Matrix3d> compositeInertiaW;
@@ -78,6 +79,7 @@ public:
   std::vector<Eigen::Vector3d> bodyLinAcc;
   std::vector<Eigen::Vector3d> bodyAngAcc;
   std::vector<Eigen::MatrixXd> dMotionSubspace;
+  Eigen::MatrixXd nonlinearities;
 
   // // links with respect to world frame
   // std::vector<Transform> oTb;

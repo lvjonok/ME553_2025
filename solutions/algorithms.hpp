@@ -53,6 +53,7 @@ inline void forwardVelocity(const Model &model, Data &data,
   data.bodyAngVel_w.resize(model.nbodies_);
   data.motionSubspace.resize(model.nbodies_);
   data.dMotionSubspace.resize(model.nbodies_);
+  data.motionCross.resize(model.nbodies_);
 
   // calculate the velocity of the body
   for (size_t i = 0; i < model.nbodies_; i++) {
@@ -156,31 +157,32 @@ inline void forwardAcceleration(
     // // below is way 1
     // // simplified for 3D computations
 
-    // // compute joint contribution
-    // // at this point we should have either prismatic or revolute joint
-    // if (joint->getType() == JointType::REVOLUTE) {
-    //   alpha += axis * gai;
-    //   alpha += pW.cross(axis * gvi);
-    // } else if (joint->getType() == JointType::PRISMATIC) {
-    //   a += axis * gai;
-    //   a += pW.cross(axis * gvi);
-    // } else {
-    //   // do nothing
-    //   std::cerr << "Should not be here, joint type is not prismatic or
-    //   revolute"
-    //             << std::endl;
-    // }
-    // data.bodyLinAcc[i] = a;
-    // data.bodyAngAcc[i] = alpha;
+    // compute joint contribution
+    // at this point we should have either prismatic or revolute joint
+    if (joint->getType() == JointType::REVOLUTE) {
+      alpha += axis * gai;
+      alpha += pW.cross(axis * gvi);
+    } else if (joint->getType() == JointType::PRISMATIC) {
+      a += axis * gai;
+      // TODO: find where does this 2 come from
+      a += 2 * pW.cross(axis * gvi);
+    } else {
+      // do nothing
+      std::cerr << "Should not be here, joint type is not prismatic or revolute"
+                << std::endl;
+    }
+    data.bodyLinAcc[i] = a;
+    data.bodyAngAcc[i] = alpha;
 
-    // below is way 2
-    // using spatial relations
-    Eigen::Matrix<double, 6, 1> aJ = S * gai;
-    aJ += dS * gvi;
-    aJ += data.motionCross[parentId] * (S * gvi);
+    // TODO: spatial version does not match right now
+    // // below is way 2
+    // // using spatial relations
+    // Eigen::Matrix<double, 6, 1> aJ = S * gai;
+    // aJ += dS * gvi;
+    // aJ += data.motionCross[parentId] * (S * gvi);
 
-    data.bodyLinAcc[i] = a + aJ.block<3, 1>(0, 0);
-    data.bodyAngAcc[i] = alpha + aJ.block<3, 1>(3, 0);
+    // data.bodyLinAcc[i] = a + aJ.block<3, 1>(0, 0);
+    // data.bodyAngAcc[i] = alpha + aJ.block<3, 1>(3, 0);
   }
 }
 
@@ -347,6 +349,136 @@ inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
   // fill the lower triangle
   data.massMatrix.triangularView<Eigen::Lower>() =
       data.massMatrix.transpose().triangularView<Eigen::Lower>();
+}
+
+inline void nonlinearities(const Model &model, Data &data,
+                           const Eigen::VectorXd &gc,
+                           const Eigen::VectorXd &gv) {
+  // we should have propagated the velocity through the kinematic chain already
+  // TODO: maybe don't call at all
+  algorithms::forwardVelocity(model, data, gc, gv);
+  algorithms::forwardAcceleration(model, data, gc, gv, gv * 0.0, {0, 0, -9.81});
+
+  // TODO: move this somewhere else
+  // compute the spatial inertia for the body
+  data.spatialInertia6.resize(model.nbodies_);
+  for (size_t i = 0; i < model.nbodies_; i++) {
+    auto link = model.bodies_[i];
+    auto inertiaW = data.inertiaW[i];
+    auto comW = data.comW[i];
+    auto jointW = data.jointPos_W[i];
+    auto mass = link->getMass();
+    auto r = comW - jointW;
+
+    Eigen::MatrixXd sI = Eigen::Matrix<double, 6, 6>::Zero();
+    sI.block<3, 3>(0, 0) = mass * Eigen::Matrix3d::Identity();
+    sI.block<3, 3>(0, 3) = -skew(r) * mass;
+    sI.block<3, 3>(3, 0) = skew(r) * mass;
+    if (i != 0) {
+      sI.block<3, 3>(3, 3) = inertiaW - mass * skew(r) * skew(r);
+    } else {
+      // TODO: I am not sure this is it
+      sI.block<3, 3>(3, 3) = inertiaW;
+    }
+
+    data.spatialInertia6[i] = sI;
+  }
+
+  // second step
+  // make a backward pass
+  // find the force wrench acting on each body
+  // collect the forces from the children
+  // then propagate to the parent
+
+  // we want to store the wrench in the world frame
+  // acting on a body
+  std::vector<Eigen::Vector3d> force(model.nbodies_);
+  std::vector<Eigen::Vector3d> torque(model.nbodies_);
+
+  // the vector to store the nonlinearities vector
+  Eigen::VectorXd b = Eigen::VectorXd::Zero(gv.size());
+  const int root =
+      (model.actuated_joints_[0]->getType() != JointType::FLOATING) ? 1 : 0;
+  for (int i = model.nbodies_ - 1; i >= root; --i) {
+    // find the current wrench from the relation
+    // f = I * a + v x I * v
+    auto sIw = data.spatialInertia6[i];
+    Eigen::VectorXd a = Eigen::VectorXd::Zero(6);
+    a.block<3, 1>(0, 0) = data.bodyLinAcc[i];
+    a.block<3, 1>(3, 0) = data.bodyAngAcc[i];
+
+    Eigen::VectorXd v = Eigen::VectorXd::Zero(6);
+    v.block<3, 1>(0, 0) = data.bodyLinVel_w[i];
+    v.block<3, 1>(3, 0) = data.bodyAngVel_w[i];
+    // Eigen::VectorXd f = sIw * a + data.motionCross[i] * (sIw * v);
+
+    // force[i] = f.block<3, 1>(0, 0);
+    // torque[i] = f.block<3, 1>(3, 0);
+
+    auto link = model.bodies_[i];
+    auto r = data.comW[i] - data.jointPos_W[i];
+    force[i] =
+        link->getMass() * Eigen::Matrix3d::Identity() * data.bodyLinAcc[i] -
+        link->getMass() * skew(r) * data.bodyAngAcc[i] +
+        link->getMass() * skew(data.bodyAngVel_w[i]) *
+            skew(data.bodyAngVel_w[i]) * r;
+
+    torque[i] = link->getMass() * skew(r) * data.bodyLinAcc[i] +
+                data.inertiaW[i] * data.bodyAngAcc[i] -
+                link->getMass() * skew(r) * skew(r) * data.bodyAngAcc[i] +
+                skew(data.bodyAngVel_w[i]) *
+                    (data.inertiaW[i] - link->getMass() * skew(r) * skew(r)) *
+                    data.bodyAngVel_w[i];
+
+    // iterate over the children
+    // and add up the forces they have experienced
+    for (auto childId : model.children_[i]) {
+      // get the force and torque of the child
+      auto fChild = force[childId];
+      auto tChild = torque[childId];
+
+      // // get the child to parent vector
+      // Eigen::Vector3d r = data.joint2joint_W[childId];
+
+      // child to parent vector
+      // Eigen::Vector3d r = data.joint2joint_W[childId];
+      Eigen::Vector3d r = data.joint2joint_W[childId];
+
+      // find plucker force motion matrix
+      Eigen::MatrixXd aXb = Eigen::MatrixXd::Identity(6, 6);
+      aXb.block<3, 3>(3, 0) = skew(r);
+      Eigen::VectorXd F = Eigen::VectorXd::Zero(6);
+      F.block<3, 1>(0, 0) = fChild;
+      F.block<3, 1>(3, 0) = tChild;
+      F = aXb * F; // 6xjoint_dof
+
+      // force[i] += fChild;
+      // torque[i] += tChild + skew(r) * fChild;
+
+      force[i] += F.block<3, 1>(0, 0);
+      torque[i] += F.block<3, 1>(3, 0);
+
+      // // add the forces and torques
+      // force[i] += fChild;
+      // torque[i] += tChild + r.cross(fChild);
+    }
+
+    // now component of the nonlinearities is S_j^T * f
+    int start_idx = model.gv_idx_[i];
+    int len = model.actuated_joints_[i]->gv_length();
+    auto S = data.motionSubspace[i];
+    Eigen::VectorXd f = Eigen::VectorXd::Zero(6);
+    f.segment(0, 3) = force[i];
+    f.segment(3, 3) = torque[i];
+    b.segment(start_idx, len) = S.transpose() * f; // joint_dof x 1
+  }
+
+  data.nonlinearities = b;
+  // std::cout << "b: " << b.transpose() << std::endl;
+
+  // after we get the wrench, we can multiply by the motion subspace
+  // and get the generalized forces
+  // for the case of a0 = -g. it will be fictitious forces or nonlinearities
 }
 
 inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
