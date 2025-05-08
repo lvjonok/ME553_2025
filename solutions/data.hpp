@@ -57,6 +57,7 @@ public:
   // velocities
   std::vector<Eigen::Vector3d> bodyLinVel_w; // linear velocity of the body
   std::vector<Eigen::Vector3d> bodyAngVel_w; // angular velocity of the body
+  std::vector<Eigen::MatrixXd> motionCross;  // twist cross product matrix
 
   // dynamic quantities
   std::vector<Eigen::Matrix3d>

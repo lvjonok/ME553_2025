@@ -110,6 +110,16 @@ inline void forwardVelocity(const Model &model, Data &data,
 
     data.bodyLinVel_w[i] = v;
     data.bodyAngVel_w[i] = w;
+    data.motionCross[i] = Eigen::MatrixXd::Zero(6, 6);
+    /*
+     * motion cross product matrix
+     * [wx 0]
+     * [vx wx]
+     */
+    data.motionCross[i].block<3, 3>(0, 0) = skew(w);
+    data.motionCross[i].block<3, 3>(0, 3) = Eigen::Matrix3d::Zero();
+    data.motionCross[i].block<3, 3>(3, 0) = skew(v);
+    data.motionCross[i].block<3, 3>(3, 3) = skew(w);
   }
 }
 
@@ -143,22 +153,34 @@ inline void forwardAcceleration(
     auto gvi = gv[model.gv_idx_[i]];
     auto gai = ga[model.gv_idx_[i]];
 
-    // compute joint contribution
-    // at this point we should have either prismatic or revolute joint
-    if (joint->getType() == JointType::REVOLUTE) {
-      alpha += axis * gai;
-      alpha += pW.cross(axis * gvi);
-    } else if (joint->getType() == JointType::PRISMATIC) {
-      a += axis * gai;
-      a += pW.cross(axis * gvi);
-    } else {
-      // do nothing
-      std::cerr << "Should not be here, joint type is not prismatic or revolute"
-                << std::endl;
-    }
+    // // below is way 1
+    // // simplified for 3D computations
 
-    data.bodyLinAcc[i] = a;
-    data.bodyAngAcc[i] = alpha;
+    // // compute joint contribution
+    // // at this point we should have either prismatic or revolute joint
+    // if (joint->getType() == JointType::REVOLUTE) {
+    //   alpha += axis * gai;
+    //   alpha += pW.cross(axis * gvi);
+    // } else if (joint->getType() == JointType::PRISMATIC) {
+    //   a += axis * gai;
+    //   a += pW.cross(axis * gvi);
+    // } else {
+    //   // do nothing
+    //   std::cerr << "Should not be here, joint type is not prismatic or
+    //   revolute"
+    //             << std::endl;
+    // }
+    // data.bodyLinAcc[i] = a;
+    // data.bodyAngAcc[i] = alpha;
+
+    // below is way 2
+    // using spatial relations
+    Eigen::Matrix<double, 6, 1> aJ = S * gai;
+    aJ += dS * gvi;
+    aJ += data.motionCross[parentId] * (S * gvi);
+
+    data.bodyLinAcc[i] = a + aJ.block<3, 1>(0, 0);
+    data.bodyAngAcc[i] = alpha + aJ.block<3, 1>(3, 0);
   }
 }
 
