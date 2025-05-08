@@ -53,7 +53,6 @@ inline void forwardVelocity(const Model &model, Data &data,
   data.bodyAngVel_w.resize(model.nbodies_);
   data.motionSubspace.resize(model.nbodies_);
   data.dMotionSubspace.resize(model.nbodies_);
-  data.motionCross.resize(model.nbodies_);
 
   // calculate the velocity of the body
   for (size_t i = 0; i < model.nbodies_; i++) {
@@ -111,16 +110,6 @@ inline void forwardVelocity(const Model &model, Data &data,
 
     data.bodyLinVel_w[i] = v;
     data.bodyAngVel_w[i] = w;
-    data.motionCross[i] = Eigen::MatrixXd::Zero(6, 6);
-    /*
-     * motion cross product matrix
-     * [wx 0]
-     * [vx wx]
-     */
-    data.motionCross[i].block<3, 3>(0, 0) = skew(w);
-    data.motionCross[i].block<3, 3>(0, 3) = Eigen::Matrix3d::Zero();
-    data.motionCross[i].block<3, 3>(3, 0) = skew(v);
-    data.motionCross[i].block<3, 3>(3, 3) = skew(w);
   }
 }
 
@@ -359,31 +348,6 @@ inline void nonlinearities(const Model &model, Data &data,
   algorithms::forwardVelocity(model, data, gc, gv);
   algorithms::forwardAcceleration(model, data, gc, gv, gv * 0.0, {0, 0, -9.81});
 
-  // TODO: move this somewhere else
-  // compute the spatial inertia for the body
-  data.spatialInertia6.resize(model.nbodies_);
-  for (size_t i = 0; i < model.nbodies_; i++) {
-    auto link = model.bodies_[i];
-    auto inertiaW = data.inertiaW[i];
-    auto comW = data.comW[i];
-    auto jointW = data.jointPos_W[i];
-    auto mass = link->getMass();
-    auto r = comW - jointW;
-
-    Eigen::MatrixXd sI = Eigen::Matrix<double, 6, 6>::Zero();
-    sI.block<3, 3>(0, 0) = mass * Eigen::Matrix3d::Identity();
-    sI.block<3, 3>(0, 3) = -skew(r) * mass;
-    sI.block<3, 3>(3, 0) = skew(r) * mass;
-    if (i != 0) {
-      sI.block<3, 3>(3, 3) = inertiaW - mass * skew(r) * skew(r);
-    } else {
-      // TODO: I am not sure this is it
-      sI.block<3, 3>(3, 3) = inertiaW;
-    }
-
-    data.spatialInertia6[i] = sI;
-  }
-
   // second step
   // make a backward pass
   // find the force wrench acting on each body
@@ -400,21 +364,9 @@ inline void nonlinearities(const Model &model, Data &data,
   const int root =
       (model.actuated_joints_[0]->getType() != JointType::FLOATING) ? 1 : 0;
   for (int i = model.nbodies_ - 1; i >= root; --i) {
+
     // find the current wrench from the relation
     // f = I * a + v x I * v
-    auto sIw = data.spatialInertia6[i];
-    Eigen::VectorXd a = Eigen::VectorXd::Zero(6);
-    a.block<3, 1>(0, 0) = data.bodyLinAcc[i];
-    a.block<3, 1>(3, 0) = data.bodyAngAcc[i];
-
-    Eigen::VectorXd v = Eigen::VectorXd::Zero(6);
-    v.block<3, 1>(0, 0) = data.bodyLinVel_w[i];
-    v.block<3, 1>(3, 0) = data.bodyAngVel_w[i];
-    // Eigen::VectorXd f = sIw * a + data.motionCross[i] * (sIw * v);
-
-    // force[i] = f.block<3, 1>(0, 0);
-    // torque[i] = f.block<3, 1>(3, 0);
-
     auto link = model.bodies_[i];
     auto r = data.comW[i] - data.jointPos_W[i];
     force[i] =
@@ -437,30 +389,11 @@ inline void nonlinearities(const Model &model, Data &data,
       auto fChild = force[childId];
       auto tChild = torque[childId];
 
-      // // get the child to parent vector
-      // Eigen::Vector3d r = data.joint2joint_W[childId];
-
       // child to parent vector
-      // Eigen::Vector3d r = data.joint2joint_W[childId];
       Eigen::Vector3d r = data.joint2joint_W[childId];
 
-      // find plucker force motion matrix
-      Eigen::MatrixXd aXb = Eigen::MatrixXd::Identity(6, 6);
-      aXb.block<3, 3>(3, 0) = skew(r);
-      Eigen::VectorXd F = Eigen::VectorXd::Zero(6);
-      F.block<3, 1>(0, 0) = fChild;
-      F.block<3, 1>(3, 0) = tChild;
-      F = aXb * F; // 6xjoint_dof
-
-      // force[i] += fChild;
-      // torque[i] += tChild + skew(r) * fChild;
-
-      force[i] += F.block<3, 1>(0, 0);
-      torque[i] += F.block<3, 1>(3, 0);
-
-      // // add the forces and torques
-      // force[i] += fChild;
-      // torque[i] += tChild + r.cross(fChild);
+      force[i] += fChild;
+      torque[i] += tChild + skew(r) * fChild;
     }
 
     // now component of the nonlinearities is S_j^T * f
