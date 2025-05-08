@@ -73,6 +73,11 @@ public:
   std::vector<Eigen::MatrixXd> spatialCompositeInertia6;
   Eigen::MatrixXd massMatrix; // mass matrix
 
+  // rnea
+  std::vector<Eigen::Vector3d> bodyLinAcc;
+  std::vector<Eigen::Vector3d> bodyAngAcc;
+  std::vector<Eigen::MatrixXd> dMotionSubspace;
+
   // // links with respect to world frame
   // std::vector<Transform> oTb;
 

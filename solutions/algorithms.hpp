@@ -51,6 +51,8 @@ inline void forwardVelocity(const Model &model, Data &data,
                             const Eigen::VectorXd &gv) {
   data.bodyLinVel_w.resize(model.nbodies_);
   data.bodyAngVel_w.resize(model.nbodies_);
+  data.motionSubspace.resize(model.nbodies_);
+  data.dMotionSubspace.resize(model.nbodies_);
 
   // calculate the velocity of the body
   for (size_t i = 0; i < model.nbodies_; i++) {
@@ -66,6 +68,9 @@ inline void forwardVelocity(const Model &model, Data &data,
 
     auto joint = model.actuated_joints_[i];
 
+    Eigen::Vector3d axis = data.jointAxis_W[i];
+    Eigen::Vector3d daxis = data.bodyAngVel_w[i].cross(axis);
+
     switch (joint->getType()) {
     case JointType::FIXED:
       // do nothing
@@ -77,25 +82,83 @@ inline void forwardVelocity(const Model &model, Data &data,
       // TODO: find out what kind of motion subspace we have
       // likely it is simply the identity matrix
       data.motionSubspace[i] = Eigen::MatrixXd::Identity(6, 6);
+      data.dMotionSubspace[i] = Eigen::MatrixXd::Zero(6, 6);
       break;
     case JointType::REVOLUTE:
       // revolute joint, we have to set the angular velocity
-      w += data.jointAxis_W[i] * gv[model.gv_idx_[i]];
+      w += axis * gv[model.gv_idx_[i]];
       // find the motion subspace in the world frame
       data.motionSubspace[i] = Eigen::VectorXd::Zero(6);
-      data.motionSubspace[i].block<3, 1>(3, 0) = data.jointAxis_W[i];
+      data.motionSubspace[i].block<3, 1>(3, 0) = axis;
+
+      // find the derivative of the motion subspace
+      data.dMotionSubspace[i] = Eigen::VectorXd::Zero(6);
+      data.dMotionSubspace[i].block<3, 1>(0, 0) = daxis;
       break;
     case JointType::PRISMATIC:
       // prismatic joint, we have to set the linear velocity
-      v += data.jointAxis_W[i] * gv[model.gv_idx_[i]];
+      v += axis * gv[model.gv_idx_[i]];
       // find the motion subspace in the world frame
       data.motionSubspace[i] = Eigen::VectorXd::Zero(6);
-      data.motionSubspace[i].block<3, 1>(0, 0) = data.jointAxis_W[i];
+      data.motionSubspace[i].block<3, 1>(0, 0) = axis;
+
+      // find the derivative of the motion subspace
+      data.dMotionSubspace[i] = Eigen::VectorXd::Zero(6);
+      data.dMotionSubspace[i].block<3, 1>(3, 0) = daxis;
       break;
     }
 
     data.bodyLinVel_w[i] = v;
     data.bodyAngVel_w[i] = w;
+  }
+}
+
+inline void forwardAcceleration(
+    const Model &model, Data &data, const Eigen::VectorXd &gc,
+    const Eigen::VectorXd &gv, const Eigen::VectorXd &ga,
+    const Eigen::Vector3d &a0 = Eigen::Vector3d(0.0, 0.0, -9.81)) {
+  data.bodyAngAcc.resize(model.nbodies_);
+  data.bodyLinAcc.resize(model.nbodies_);
+
+  // a0 says the zero linear velocity for the first body
+  data.bodyLinAcc[0] = -a0;
+  data.bodyAngAcc[0] = Eigen::Vector3d::Zero();
+
+  for (size_t i = 1; i < model.nbodies_; i++) {
+    auto parentId = model.parents_[i];
+    assert(parentId != -1);
+
+    Eigen::Vector3d a = data.bodyLinAcc[parentId];
+    Eigen::Vector3d alpha = data.bodyAngAcc[parentId];
+
+    Eigen::Vector3d pW = data.bodyAngVel_w[parentId];
+    Eigen::Vector3d r = data.joint2joint_W[i];
+    a += alpha.cross(r) + pW.cross(pW.cross(r));
+
+    auto joint = model.actuated_joints_[i];
+    auto S = data.motionSubspace[i];
+    auto dS = data.dMotionSubspace[i];
+    auto axis = data.jointAxis_W[i];
+
+    auto gvi = gv[model.gv_idx_[i]];
+    auto gai = ga[model.gv_idx_[i]];
+
+    // compute joint contribution
+    // at this point we should have either prismatic or revolute joint
+    if (joint->getType() == JointType::REVOLUTE) {
+      alpha += axis * gai;
+      alpha += pW.cross(axis * gvi);
+    } else if (joint->getType() == JointType::PRISMATIC) {
+      a += axis * gai;
+      a += pW.cross(axis * gvi);
+    } else {
+      // do nothing
+      std::cerr << "Should not be here, joint type is not prismatic or revolute"
+                << std::endl;
+    }
+
+    data.bodyLinAcc[i] = a;
+    data.bodyAngAcc[i] = alpha;
   }
 }
 

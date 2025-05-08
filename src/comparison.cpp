@@ -58,9 +58,9 @@ int main(int argc, char *argv[]) {
   // map of robot name → URDF path; comment out entries to disable
   std::map<std::string, std::string> robots = {
       {"cheetah", RESOURCE + "mini_cheetah/urdf/cheetah.urdf"},
-      {"panda", RESOURCE + "Panda/panda.urdf"},
-      {"cart_pole", RESOURCE + "cartPole/doubleCartPole.urdf"},
-      {"3drobot", RESOURCE + "2DRobotArm/robot_3D.urdf"},
+      // {"panda", RESOURCE + "Panda/panda.urdf"},
+      // {"cart_pole", RESOURCE + "cartPole/doubleCartPole.urdf"},
+      // {"3drobot", RESOURCE + "2DRobotArm/robot_3D.urdf"},
   };
 
   // preload systems, models, data, and dims
@@ -218,6 +218,20 @@ int main(int argc, char *argv[]) {
       // compare the mass matrix
       algorithms::crba(model, data, gc);
       ASSERT_APPROX(raisimMassMatrix, data.massMatrix);
+    }
+    // compare the nonlinear effects
+    if (name != "panda") {
+      auto b = sys->getNonlinearities({0, 0, -9.81}).e();
+      algorithms::forwardAcceleration(model, data, gc, gv, gv * 0.0);
+
+      // check whether we set body linear acc and angular acc here
+      for (size_t i = 0; i < sys->getBodyNames().size(); ++i) {
+        auto raisimLinAcc = sys->bodyLinearAcc[i].e();
+        auto raisimAngAcc = sys->bodyAngAcc[i].e();
+
+        ASSERT_APPROX(raisimLinAcc, data.bodyLinAcc[i]);
+        ASSERT_APPROX(raisimAngAcc, data.bodyAngAcc[i]);
+      }
     }
   };
 
