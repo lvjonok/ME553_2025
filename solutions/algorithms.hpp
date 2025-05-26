@@ -414,6 +414,116 @@ inline void nonlinearities(const Model &model, Data &data,
   // for the case of a0 = -g. it will be fictitious forces or nonlinearities
 }
 
+inline void articulatedBodyAlgorithm(const Model &model, Data &data,
+                                     const Eigen::VectorXd &gc,
+                                     const Eigen::VectorXd &gv,
+                                     const Eigen::VectorXd &gf) {
+  // first, coming from root to the leaves we compute the kinematics and NE
+  // terms Ma and ba
+  algorithms::forwardVelocity(model, data, gc, gv);
+  algorithms::forwardAcceleration(model, data, gc, gv, gv * 0.0, {0, 0, -9.81});
+  algorithms::compositeInertia(model, data, gc);
+
+  // store the rigid-body bias forces and spatial inertia
+  std::vector<Eigen::VectorXd> Ba(model.nbodies_);
+  std::vector<Eigen::MatrixXd> Ma(model.nbodies_);
+  for (size_t i = 0; i < model.nbodies_; ++i) {
+    // zero vector for the bias forces
+    Ba[i] = Eigen::VectorXd::Zero(6);
+
+    // find the current wrench from the relation
+    // f = v x I * v + f_ext
+    // TODO: decide whether to use the external forces or not
+    auto link = model.bodies_[i];
+    auto r = data.comW[i] - data.jointPos_W[i];
+    Ba[i].segment(0, 3) =
+        link->getMass() * Eigen::Matrix3d::Identity() * data.bodyLinAcc[i] -
+        link->getMass() * skew(r) * data.bodyAngAcc[i] +
+        link->getMass() * skew(data.bodyAngVel_w[i]) *
+            skew(data.bodyAngVel_w[i]) * r;
+
+    Ba[i].segment(3, 3) =
+        link->getMass() * skew(r) * data.bodyLinAcc[i] +
+        data.inertiaW[i] * data.bodyAngAcc[i] -
+        link->getMass() * skew(r) * skew(r) * data.bodyAngAcc[i] +
+        skew(data.bodyAngVel_w[i]) *
+            (data.inertiaW[i] - link->getMass() * skew(r) * skew(r)) *
+            data.bodyAngVel_w[i];
+
+    // find the spatial inertia
+    Ma[i] = Eigen::MatrixXd::Zero(6, 6);
+    Ma[i].block<3, 3>(0, 0) = link->getMass() * Eigen::Matrix3d::Identity();
+    Ma[i].block<3, 3>(0, 3) = -skew(r) * link->getMass();
+    Ma[i].block<3, 3>(3, 0) = skew(r) * link->getMass();
+    Ma[i].block<3, 3>(3, 3) =
+        data.inertiaW[i] - link->getMass() * skew(r) * skew(r);
+    // if (i != 0) {
+    // } else {
+    //   Ma[i].block<3, 3>(3, 3) = data.inertiaW[i];
+    // }
+  }
+
+  // compute the ba terms, those are like in nonlinearities,
+  // but we don't need to accumulate them
+
+  // second, from leaves to the root we compute the
+  // articulated inertia and fictitious forces but for the subtree
+
+  const int root =
+      (model.actuated_joints_[0]->getType() != JointType::FLOATING) ? 1 : 0;
+  for (int i = model.nbodies_ - 1; i >= root; --i) {
+    // if there is a parent, we need to add up the effect
+    // of articulated inertia and bias force to it
+
+    auto parentId = model.parents_[i];
+    if (parentId == -1) {
+      // this is the root, we don't need to do anything
+      continue;
+    }
+
+    auto rpb = data.joint2joint_W[i]; // child to parent vector
+    Eigen::MatrixXd Xbp = Eigen::MatrixXd::Identity(6, 6);
+    Xbp.block(3, 0, 3, 3) = skew(rpb);
+    Eigen::MatrixXd XbpT = Xbp.transpose();
+    Eigen::MatrixXd dXbp = Eigen::MatrixXd::Zero(6, 6);
+    dXbp.block(3, 0, 3, 3) = skew(data.bodyAngVel_w[i].cross(rpb));
+    Eigen::MatrixXd dXbpT = dXbp.transpose();
+
+    Eigen::MatrixXd S = data.motionSubspace[i];
+    Eigen::MatrixXd ST = S.transpose();
+    Eigen::MatrixXd dS = data.dMotionSubspace[i];
+    Eigen::MatrixXd dST = dS.transpose();
+
+    Eigen::VectorXd W = Eigen::VectorXd::Zero(6);
+    W.segment(0, 3) = data.bodyLinVel_w[i];
+    W.segment(3, 3) = data.bodyAngVel_w[i];
+
+    // find the velocity for the body
+    auto v_start = model.gv_idx_[i];
+    auto v_len = model.actuated_joints_[i]->gv_length();
+    auto gvi = gv.segment(v_start, v_len);
+    auto gfi = gf.segment(v_start, v_len);
+
+    // find the articulated inertia
+    Ma[parentId] +=
+        Xbp * Ma[i] *
+        (-S * (ST * Ma[i] * S).inverse() * (ST * Ma[i] * XbpT) + XbpT);
+    Ba[parentId] +=
+        Xbp *
+        (Ma[i] * (S * (ST * Ma[i] * S).inverse() *
+                      (gfi - ST * Ma[i] * (dS * gvi + dXbpT * W) - ST * Ba[i]) +
+                  dS * gvi + dXbpT * W) +
+         Ba[i]);
+  }
+
+  // third, from root to the leaves we compute the
+  // u_dot and then acceleration terms
+
+  // try compute the acceleration for the floating base system
+  auto baseacc = Ma[0].inverse() * (gf.segment(0, 6) - Ba[0]);
+  std::cout << "baseacc: " << baseacc.transpose() << std::endl;
+}
+
 inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
                      const Eigen::VectorXd &gv) {
   forwardPosition(model, data, gc);
