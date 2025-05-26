@@ -518,10 +518,50 @@ inline void articulatedBodyAlgorithm(const Model &model, Data &data,
 
   // third, from root to the leaves we compute the
   // u_dot and then acceleration terms
+  Eigen::VectorXd u_dot = Eigen::VectorXd::Zero(model.gv_size_);
+  std::vector<Eigen::VectorXd> Wdot(model.nbodies_); // acceleration of bodies
+  Wdot[0] = Ma[0].inverse() * (gf.segment(0, 6) - Ba[0]); // base is zero
+
+  for (size_t i = 1; i < model.nbodies_; ++i) {
+    auto parentId = model.parents_[i];
+
+    auto rpb = data.joint2joint_W[i]; // child to parent vector
+    Eigen::MatrixXd Xbp = Eigen::MatrixXd::Identity(6, 6);
+    Xbp.block(3, 0, 3, 3) = skew(rpb);
+    Eigen::MatrixXd XbpT = Xbp.transpose();
+    Eigen::MatrixXd dXbp = Eigen::MatrixXd::Zero(6, 6);
+    dXbp.block(3, 0, 3, 3) = skew(data.bodyAngVel_w[i].cross(rpb));
+    Eigen::MatrixXd dXbpT = dXbp.transpose();
+
+    Eigen::MatrixXd S = data.motionSubspace[i];
+    Eigen::MatrixXd ST = S.transpose();
+    Eigen::MatrixXd dS = data.dMotionSubspace[i];
+    Eigen::MatrixXd dST = dS.transpose();
+
+    Eigen::VectorXd W = Eigen::VectorXd::Zero(6);
+    W.segment(0, 3) = data.bodyLinVel_w[parentId];
+    W.segment(3, 3) = data.bodyAngVel_w[parentId];
+
+    // find the velocity for the body
+    auto v_start = model.gv_idx_[i];
+    auto v_len = model.actuated_joints_[i]->gv_length();
+    auto gvi = gv.segment(v_start, v_len);
+    auto gfi = gf.segment(v_start, v_len);
+
+    // first, compute the acceleration in generalized coordinates
+    u_dot.segment(v_start, v_len) =
+        (ST * Ma[i] * S).inverse() *
+        (gfi - ST * Ma[i] * (dS * gvi + XbpT * Wdot[parentId] + dXbpT * W) -
+         ST * Ba[i]);
+
+    // then compute the acceleration of the body in spatial coordinates
+    Wdot[i] = S * u_dot.segment(v_start, v_len) + dS * gvi +
+              XbpT * Wdot[parentId] + dXbpT * W;
+  }
 
   // try compute the acceleration for the floating base system
-  auto baseacc = Ma[0].inverse() * (gf.segment(0, 6) - Ba[0]);
-  std::cout << "baseacc: " << baseacc.transpose() << std::endl;
+  u_dot.segment(0, 6) = Wdot[0];
+  std::cout << "u_dot: " << u_dot.transpose() << std::endl;
 }
 
 inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
