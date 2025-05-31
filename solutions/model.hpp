@@ -11,6 +11,8 @@
 #include <tinyxml_rai/tinyxml_rai.h>
 #include <vector>
 
+namespace algorithms {
+
 using Transform = Eigen::Matrix4d;
 using SpatialTransform = Eigen::Matrix<double, 6, 6>;
 using Motion = Eigen::Matrix<double, 6, 1>;
@@ -877,5 +879,6 @@ public:
 
   // Joint *fixed_joints_ = nullptr;
 };
+} // namespace model
 
 #endif

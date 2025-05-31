@@ -3,6 +3,8 @@
 
 #include "model.hpp"
 
+namespace algorithms {
+
 class Data {
 public:
   Data(const Model &model) {
@@ -31,6 +33,11 @@ public:
       bodyLinVel_w[i] = Eigen::Vector3d::Zero();
       bodyAngVel_w[i] = Eigen::Vector3d::Zero();
       joint2joint_W[i] = Eigen::Vector3d::Zero();
+    }
+
+    ST.resize(model.actuated_joints_.size());
+    for (size_t i = 0; i < model.actuated_joints_.size(); i++) {
+      ST[i].setZero();
     }
   };
 
@@ -80,6 +87,15 @@ public:
   std::vector<Eigen::MatrixXd> dMotionSubspace;
   Eigen::MatrixXd nonlinearities;
 
+  // aba
+
+  // velocity and acceleration matched with pinocchio
+  std::vector<Eigen::VectorXd> ov, oa_gf, oh, of;
+  Eigen::VectorXd u, dv;
+  std::vector<Eigen::MatrixXd> aXb, U, Dinv, Jcols;
+
+  std::vector<Eigen::Matrix<double, 1, 6>> ST; // S^T term for each joint
+
   // // links with respect to world frame
   // std::vector<Transform> oTb;
 
@@ -114,5 +130,7 @@ public:
 
   // Eigen::MatrixXd massMatrix; // mass matrix
 };
+
+} // namespace algorithms
 
 #endif // DATA_HPP

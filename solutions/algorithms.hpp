@@ -93,7 +93,7 @@ inline void forwardVelocity(const Model &model, Data &data,
 
       // find the derivative of the motion subspace
       data.dMotionSubspace[i] = Eigen::VectorXd::Zero(6);
-      data.dMotionSubspace[i].block<3, 1>(0, 0) = daxis;
+      data.dMotionSubspace[i].block<3, 1>(3, 0) = daxis;
       break;
     case JointType::PRISMATIC:
       // prismatic joint, we have to set the linear velocity
@@ -104,7 +104,7 @@ inline void forwardVelocity(const Model &model, Data &data,
 
       // find the derivative of the motion subspace
       data.dMotionSubspace[i] = Eigen::VectorXd::Zero(6);
-      data.dMotionSubspace[i].block<3, 1>(3, 0) = daxis;
+      data.dMotionSubspace[i].block<3, 1>(0, 0) = daxis;
       break;
     }
 
@@ -123,6 +123,9 @@ inline void forwardAcceleration(
   // a0 says the zero linear velocity for the first body
   data.bodyLinAcc[0] = -a0;
   data.bodyAngAcc[0] = Eigen::Vector3d::Zero();
+
+  // data.bodyLinAcc[0] = -a0 + ga.segment(0, 3);
+  // data.bodyAngAcc[0] = ga.segment(3, 3);
 
   for (size_t i = 1; i < model.nbodies_; i++) {
     auto parentId = model.parents_[i];
@@ -341,12 +344,12 @@ inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
 }
 
 inline void nonlinearities(const Model &model, Data &data,
-                           const Eigen::VectorXd &gc,
-                           const Eigen::VectorXd &gv) {
+                           const Eigen::VectorXd &gc, const Eigen::VectorXd &gv,
+                           const Eigen::VectorXd &ga) {
   // we should have propagated the velocity through the kinematic chain already
   // TODO: maybe don't call at all
   algorithms::forwardVelocity(model, data, gc, gv);
-  algorithms::forwardAcceleration(model, data, gc, gv, gv * 0.0, {0, 0, -9.81});
+  algorithms::forwardAcceleration(model, data, gc, gv, ga, {0, 0, -9.81});
 
   // second step
   // make a backward pass
@@ -414,10 +417,217 @@ inline void nonlinearities(const Model &model, Data &data,
   // for the case of a0 = -g. it will be fictitious forces or nonlinearities
 }
 
+inline void nonlinearities(const Model &model, Data &data,
+                           const Eigen::VectorXd &gc,
+                           const Eigen::VectorXd &gv) {
+  return nonlinearities(model, data, gc, gv, gv * 0.0);
+}
+
+inline Eigen::VectorXd motionAct(const Eigen::VectorXd &v1,
+                                 const Eigen::VectorXd &v2) {
+  // this function computes the motion actuation
+  Eigen::VectorXd res = Eigen::VectorXd::Zero(6);
+
+  Eigen::Vector3d v1_lin = v1.segment(0, 3);
+  Eigen::Vector3d v1_ang = v1.segment(3, 3);
+
+  Eigen::Vector3d v2_lin = v2.segment(0, 3);
+  Eigen::Vector3d v2_ang = v2.segment(3, 3);
+
+  res.segment(0, 3) = v1_lin.cross(v2_ang) + v1_ang.cross(v2_lin);
+  res.segment(3, 3) = v1_ang.cross(v2_ang);
+
+  return res;
+}
+
+inline Eigen::VectorXd cross(Eigen::VectorXd v1, Eigen::VectorXd v2) {
+  // this function computes the cross product of two vectors
+  // in the spatial vector form
+  Eigen::VectorXd res = Eigen::VectorXd::Zero(6);
+
+  Eigen::Vector3d v1_lin = v1.segment(0, 3);
+  Eigen::Vector3d v1_ang = v1.segment(3, 3);
+
+  Eigen::Vector3d v2_lin = v2.segment(0, 3);
+  Eigen::Vector3d v2_ang = v2.segment(3, 3);
+
+  res.segment(0, 3) = v1_ang.cross(v2_lin);
+  res.segment(3, 3) = v1_ang.cross(v2_ang) + v1_lin.cross(v2_lin);
+
+  return res;
+}
+
+inline void aba_pass1(const Model &model, Data &data, const Eigen::VectorXd &gc,
+                      const Eigen::VectorXd &gv, const Eigen::VectorXd &gf) {
+  // first, we compute the forward kinematics
+  algorithms::forwardPosition(model, data, gc);
+  algorithms::forwardVelocity(model, data, gc, gv);
+  algorithms::compositeInertia(model, data, gc);
+
+  // forward pass where we compute and update the velocity and acceleration
+  // expressed at the world frame
+  data.ov.resize(model.nbodies_);
+  data.oa_gf.resize(model.nbodies_);
+  data.oh.resize(model.nbodies_);
+  data.of.resize(model.nbodies_);
+  data.spatialInertia6.resize(model.nbodies_);
+
+  data.spatialInertia6[0] = Eigen::MatrixXd::Zero(6, 6);
+  data.oh[0] = Eigen::VectorXd::Zero(6);
+  data.of[0] = Eigen::VectorXd::Zero(6);
+  data.ov[0] = Eigen::VectorXd::Zero(6);
+  data.oa_gf[0] = Eigen::VectorXd::Zero(6);
+  // const Eigen::Vector3d gravity = Eigen::Vector3d(0.0, 0.0, -9.81);
+  // data.oa_gf[0].segment(0, 3) = -gravity; // linear acceleration
+
+  data.aXb.resize(model.nbodies_);
+
+  for (size_t i = 1; i < model.nbodies_; i++) {
+    auto joint = model.actuated_joints_[i];
+    auto parentId = model.parents_[i];
+
+    data.aXb[i] = algorithms::aXb(data.rot_WB[i], data.jointPos_W[i]);
+    if (joint->getType() != JointType::FIXED) {
+      // a bit shady way for the first body that can be fixed or floating
+      Eigen::VectorXd jv = data.motionSubspace[i] * gv[model.gv_idx_[i]];
+      data.ov[i] = data.aXb[i] * jv;
+      std::cout << "initial ov[" << i << "] = " << data.ov[i].transpose()
+                << std::endl;
+    }
+    if (parentId != -1)
+      data.ov[i] += data.ov[parentId];
+
+    // data.oa_gf[i] = Eigen::VectorXd::Zero(6);
+    if (parentId != -1)
+      data.oa_gf[i] = motionAct(data.ov[parentId], data.ov[i]);
+
+    std::cout << "oa_gf[" << i << "] = " << data.oa_gf[i].transpose()
+              << std::endl;
+
+    // the spatial inertia we get here is already data.oMi[i].act(inertia[i]);
+    // just because we have had already all the quantities computed for the
+    // world frame
+    Eigen::MatrixXd spatialInertia = Eigen::MatrixXd::Zero(6, 6);
+    {
+      auto r = data.comW[i];
+      auto m = model.bodies_[i]->getMass();
+      auto I = data.inertiaW[i];
+      spatialInertia.block<3, 3>(0, 0) = m * Eigen::Matrix3d::Identity();
+      spatialInertia.block<3, 3>(3, 3) = I - m * skew(r) * skew(r);
+      spatialInertia.block<3, 3>(0, 3) = -skew(r) * m;
+      spatialInertia.block<3, 3>(3, 0) = skew(r) * m;
+    }
+
+    data.spatialInertia6[i] = spatialInertia;
+    // std::cout << "Ybase " << i << " is " << data.spatialInertia6[i]
+    //           << std::endl;
+
+    // compute oh = I * v;
+    data.oh[i] = data.spatialInertia6[i] * data.ov[i];
+    // compute of = ov x oh;
+    data.of[i] = algorithms::cross(data.ov[i], data.oh[i]);
+  }
+
+  std::cout << "first oa_gf: " << data.oa_gf[0].transpose() << std::endl;
+}
+
+inline void aba_pass2(const Model &model, Data &data, const Eigen::VectorXd &gc,
+                      const Eigen::VectorXd &gv, const Eigen::VectorXd &gf) {
+  data.u = gf.eval();
+
+  data.U.resize(model.nbodies_);
+  data.Dinv.resize(model.nbodies_);
+  data.Jcols.resize(model.nbodies_);
+
+  // backward pass to update the forces and spatial inertias
+  // TODO: for the floating base we will iterate towards zero
+  for (int i = model.nbodies_ - 1; i >= 1; --i) {
+    auto link = model.bodies_[i];
+
+    auto joint = model.actuated_joints_[i];
+
+    Eigen::MatrixXd I6 = data.spatialInertia6[i];
+    Eigen::VectorXd fi = data.of[i];
+
+    auto ui = data.u.segment(model.gv_idx_[i], joint->gv_length());
+
+    // ui = tau_i - ST * fi
+    data.Jcols[i] = (data.aXb[i] * data.motionSubspace[i]);
+    ui -= data.Jcols[i].transpose() * fi;
+
+    // std::cout << "u: " << data.u.transpose() << std::endl;
+    // std::cout << "jcols: " << (aXb * data.motionSubspace[i]).transpose()
+    //           << std::endl;
+
+    // find U = Ia * S
+    data.U[i] = I6 * data.Jcols[i];
+    // find D = ST * U
+    Eigen::MatrixXd D = data.Jcols[i].transpose() * data.U[i];
+    // find Dinv
+    data.Dinv[i] = D.inverse();
+
+    // if there is parent, propagate the forces and inertia
+    // Ia -= U * Dinv * UT
+    // fi += I * oa_gf + UDinv * u_i
+    auto parentId = model.parents_[i];
+    if (parentId > 0) { // TODO: have to change for the floating base later
+      // Ia -= (data.U[i] * data.Dinv[i]) * data.U[i].transpose();
+      Eigen::MatrixXd Ia =
+          I6 - (data.U[i] * data.Dinv[i]) * data.U[i].transpose();
+      data.spatialInertia6[i] = Ia;
+
+      fi += Ia * data.oa_gf[i] + (data.U[i] * data.Dinv[i]) * ui;
+      data.of[i] = fi;
+
+      // propagate the inertia and force to the parent
+      data.spatialInertia6[parentId] += Ia;
+      std::cout << "inertia of " << parentId << " has been updated to "
+                << data.spatialInertia6[parentId] << std::endl;
+      data.of[parentId] += fi;
+    }
+  }
+}
+
+inline void aba_pass3(const Model &model, Data &data, const Eigen::VectorXd &gc,
+                      const Eigen::VectorXd &gv, const Eigen::VectorXd &gf) {
+  // forward pass to update the acceleration
+  Eigen::VectorXd ga = Eigen::VectorXd::Zero(model.gv_size_);
+  data.oa_gf[0] = Eigen::VectorXd::Zero(6);
+  const Eigen::Vector3d gravity = Eigen::Vector3d(0.0, 0.0, -9.81);
+  data.oa_gf[0].segment(0, 3) = -gravity; // linear acceleration
+  for (size_t i = 1; i < model.nbodies_; i++) {
+    auto joint = model.actuated_joints_[i];
+    auto parentId = model.parents_[i];
+
+    data.oa_gf[i] += data.oa_gf[parentId];
+    auto gai = ga.segment(model.gv_idx_[i], joint->gv_length());
+
+    Eigen::MatrixXd Ia = data.spatialInertia6[i];
+    Eigen::VectorXd fi = data.of[i];
+
+    auto ui = data.u.segment(model.gv_idx_[i], joint->gv_length());
+
+    gai = data.Dinv[i] * ui -
+          (data.U[i] * data.Dinv[i]).transpose() * data.oa_gf[i];
+    data.oa_gf[i] += data.Jcols[i] * gai;
+  }
+
+  std::cout << "Result of aba" << std::endl;
+  std::cout << "ga: " << ga.transpose() << std::endl;
+
+  data.dv = ga;
+}
+
 inline void articulatedBodyAlgorithm(const Model &model, Data &data,
                                      const Eigen::VectorXd &gc,
                                      const Eigen::VectorXd &gv,
                                      const Eigen::VectorXd &gf) {
+
+  aba_pass1(model, data, gc, gv, gf);
+  aba_pass2(model, data, gc, gv, gf);
+  aba_pass3(model, data, gc, gv, gf);
+  return;
+
   // first, coming from root to the leaves we compute the kinematics and NE
   // terms Ma and ba
   algorithms::forwardVelocity(model, data, gc, gv);
@@ -475,12 +685,6 @@ inline void articulatedBodyAlgorithm(const Model &model, Data &data,
     // if there is a parent, we need to add up the effect
     // of articulated inertia and bias force to it
 
-    auto parentId = model.parents_[i];
-    if (parentId == -1) {
-      // this is the root, we don't need to do anything
-      continue;
-    }
-
     auto rpb = data.joint2joint_W[i]; // child to parent vector
     Eigen::MatrixXd Xbp = Eigen::MatrixXd::Identity(6, 6);
     Xbp.block(3, 0, 3, 3) = skew(rpb);
@@ -504,6 +708,17 @@ inline void articulatedBodyAlgorithm(const Model &model, Data &data,
     auto gvi = gv.segment(v_start, v_len);
     auto gfi = gf.segment(v_start, v_len);
 
+    // auto Ui = Ma[i] * S; // 6xjoint_dof
+    // auto Di = ST * Ui;
+
+    // auto ui = gfi - ST * Ba[i];
+
+    auto parentId = model.parents_[i];
+    if (parentId == -1) {
+      // this is the root, we don't need to do anything
+      continue;
+    }
+
     // find the articulated inertia
     Ma[parentId] +=
         Xbp * Ma[i] *
@@ -520,7 +735,17 @@ inline void articulatedBodyAlgorithm(const Model &model, Data &data,
   // u_dot and then acceleration terms
   Eigen::VectorXd u_dot = Eigen::VectorXd::Zero(model.gv_size_);
   std::vector<Eigen::VectorXd> Wdot(model.nbodies_); // acceleration of bodies
-  Wdot[0] = Ma[0].inverse() * (gf.segment(0, 6) - Ba[0]); // base is zero
+
+  if (model.actuated_joints_[0]->getType() == JointType::FLOATING) {
+    // for floating base we have the first 6 entries
+    // of the generalized velocity vector
+    Wdot[0] = Ma[0].inverse() * (gf.segment(0, 6) - Ba[0]); // base is zero
+    u_dot.segment(0, 6) = Wdot[0];
+  } else {
+    // for fixed base we have the first 6 entries
+    // of the generalized velocity vector as zero
+    Wdot[0] = Eigen::VectorXd::Zero(6);
+  }
 
   for (size_t i = 1; i < model.nbodies_; ++i) {
     auto parentId = model.parents_[i];
@@ -559,8 +784,6 @@ inline void articulatedBodyAlgorithm(const Model &model, Data &data,
               XbpT * Wdot[parentId] + dXbpT * W;
   }
 
-  // try compute the acceleration for the floating base system
-  u_dot.segment(0, 6) = Wdot[0];
   std::cout << "u_dot: " << u_dot.transpose() << std::endl;
 }
 
