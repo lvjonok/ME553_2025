@@ -25,7 +25,7 @@ public:
     bodyLinVel_w.resize(model.actuated_joints_.size());
     bodyAngVel_w.resize(model.actuated_joints_.size());
     joint2joint_W.resize(model.actuated_joints_.size());
-    motionSubspace.resize(model.actuated_joints_.size());
+    S.resize(model.actuated_joints_.size());
     for (size_t i = 0; i < model.actuated_joints_.size(); i++) {
       rot_WB[i] = Eigen::Matrix3d::Identity();
       jointPos_W[i] = Eigen::Vector3d::Zero();
@@ -59,7 +59,7 @@ public:
   // vector between the joint i and its parent joint in the world frame
   std::vector<Eigen::Vector3d> joint2joint_W;
   // motion subspace of the body i in the world frame
-  std::vector<Eigen::MatrixXd> motionSubspace;
+  std::vector<Eigen::MatrixXd> S;
 
   // velocities
   std::vector<Eigen::Vector3d> bodyLinVel_w; // linear velocity of the body
@@ -84,7 +84,7 @@ public:
   // rnea
   std::vector<Eigen::Vector3d> bodyLinAcc;
   std::vector<Eigen::Vector3d> bodyAngAcc;
-  std::vector<Eigen::MatrixXd> dMotionSubspace;
+  std::vector<Eigen::MatrixXd> dS;
   Eigen::MatrixXd nonlinearities;
 
   // aba
@@ -95,6 +95,22 @@ public:
   std::vector<Eigen::MatrixXd> aXb, U, Dinv, Jcols;
 
   std::vector<Eigen::Matrix<double, 1, 6>> ST; // S^T term for each joint
+
+  // plucker transform with [[I, -skew(r)], [0, I]]
+  std::vector<Eigen::Matrix<double, 6, 6>> XT;
+
+  // articulated inertias and bias
+  std::vector<Eigen::Matrix<double, 6, 6>> Ma;
+  std::vector<Eigen::Matrix<double, 6, 1>> Pa;
+  std::vector<Eigen::MatrixXd> STMaXT; // S^T * Ma * X^T
+  std::vector<Eigen::MatrixXd> STMa;   // S^T * Ma
+  std::vector<Eigen::MatrixXd> STMaSinvSTMaXT;
+  std::vector<Eigen::MatrixXd> SdotUpXdotTV;
+  std::vector<double> STMaSinv;
+  std::vector<Eigen::MatrixXd> Xbp, dXbpT; // plucker
+  std::vector<Eigen::MatrixXd> W;          // simply twist
+  std::vector<Eigen::VectorXd> Wdot;       // acc of body
+  Eigen::VectorXd udot; // acceleration of the generalized coordinates
 
   // // links with respect to world frame
   // std::vector<Transform> oTb;

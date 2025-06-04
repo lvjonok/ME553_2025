@@ -879,6 +879,6 @@ public:
 
   // Joint *fixed_joints_ = nullptr;
 };
-} // namespace model
+} // namespace algorithms
 
 #endif

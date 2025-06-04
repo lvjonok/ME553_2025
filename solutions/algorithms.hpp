@@ -51,8 +51,8 @@ inline void forwardVelocity(const Model &model, Data &data,
                             const Eigen::VectorXd &gv) {
   data.bodyLinVel_w.resize(model.nbodies_);
   data.bodyAngVel_w.resize(model.nbodies_);
-  data.motionSubspace.resize(model.nbodies_);
-  data.dMotionSubspace.resize(model.nbodies_);
+  data.S.resize(model.nbodies_);
+  data.dS.resize(model.nbodies_);
 
   // calculate the velocity of the body
   for (size_t i = 0; i < model.nbodies_; i++) {
@@ -81,30 +81,30 @@ inline void forwardVelocity(const Model &model, Data &data,
       w = gv.segment(3, 3);
       // TODO: find out what kind of motion subspace we have
       // likely it is simply the identity matrix
-      data.motionSubspace[i] = Eigen::MatrixXd::Identity(6, 6);
-      data.dMotionSubspace[i] = Eigen::MatrixXd::Zero(6, 6);
+      data.S[i] = Eigen::MatrixXd::Identity(6, 6);
+      data.dS[i] = Eigen::MatrixXd::Zero(6, 6);
       break;
     case JointType::REVOLUTE:
       // revolute joint, we have to set the angular velocity
       w += axis * gv[model.gv_idx_[i]];
       // find the motion subspace in the world frame
-      data.motionSubspace[i] = Eigen::VectorXd::Zero(6);
-      data.motionSubspace[i].block<3, 1>(3, 0) = axis;
+      data.S[i] = Eigen::VectorXd::Zero(6);
+      data.S[i].block<3, 1>(3, 0) = axis;
 
       // find the derivative of the motion subspace
-      data.dMotionSubspace[i] = Eigen::VectorXd::Zero(6);
-      data.dMotionSubspace[i].block<3, 1>(3, 0) = daxis;
+      data.dS[i] = Eigen::VectorXd::Zero(6);
+      data.dS[i].block<3, 1>(3, 0) = daxis;
       break;
     case JointType::PRISMATIC:
       // prismatic joint, we have to set the linear velocity
       v += axis * gv[model.gv_idx_[i]];
       // find the motion subspace in the world frame
-      data.motionSubspace[i] = Eigen::VectorXd::Zero(6);
-      data.motionSubspace[i].block<3, 1>(0, 0) = axis;
+      data.S[i] = Eigen::VectorXd::Zero(6);
+      data.S[i].block<3, 1>(0, 0) = axis;
 
       // find the derivative of the motion subspace
-      data.dMotionSubspace[i] = Eigen::VectorXd::Zero(6);
-      data.dMotionSubspace[i].block<3, 1>(0, 0) = daxis;
+      data.dS[i] = Eigen::VectorXd::Zero(6);
+      data.dS[i].block<3, 1>(0, 0) = daxis;
       break;
     }
 
@@ -139,8 +139,8 @@ inline void forwardAcceleration(
     a += alpha.cross(r) + pW.cross(pW.cross(r));
 
     auto joint = model.actuated_joints_[i];
-    auto S = data.motionSubspace[i];
-    auto dS = data.dMotionSubspace[i];
+    auto S = data.S[i];
+    auto dS = data.dS[i];
     auto axis = data.jointAxis_W[i];
 
     auto gvi = gv[model.gv_idx_[i]];
@@ -297,7 +297,7 @@ inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
 
   for (int j = model.nbodies_ - 1; j >= root; --j) {
     // get current subspce motion and composite spatial inertia
-    auto Sj = data.motionSubspace[j];            // 6xjoint_dof
+    auto Sj = data.S[j];                         // 6xjoint_dof
     auto Isp = data.spatialCompositeInertia6[j]; // 6x6
 
     // find a block to put the diagonal entry (it may be a matrix for floating
@@ -330,7 +330,7 @@ inline void crba(const Model &model, Data &data, const Eigen::VectorXd &gc) {
       auto a_len = model.actuated_joints_[a]->gv_length();
 
       // current joint subspace motion matrix
-      auto Sa = data.motionSubspace[a];           // 6xjoint_dof
+      auto Sa = data.S[a];                        // 6xjoint_dof
       Eigen::MatrixXd entry = Sa.transpose() * F; // joint_dof x joint_dof
       data.massMatrix.block(a_row, j_col, a_len, j_len) = entry;
       // advance up
@@ -402,7 +402,7 @@ inline void nonlinearities(const Model &model, Data &data,
     // now component of the nonlinearities is S_j^T * f
     int start_idx = model.gv_idx_[i];
     int len = model.actuated_joints_[i]->gv_length();
-    auto S = data.motionSubspace[i];
+    auto S = data.S[i];
     Eigen::VectorXd f = Eigen::VectorXd::Zero(6);
     f.segment(0, 3) = force[i];
     f.segment(3, 3) = torque[i];
@@ -457,334 +457,179 @@ inline Eigen::VectorXd cross(Eigen::VectorXd v1, Eigen::VectorXd v2) {
   return res;
 }
 
+namespace aba {
 inline void aba_pass1(const Model &model, Data &data, const Eigen::VectorXd &gc,
                       const Eigen::VectorXd &gv, const Eigen::VectorXd &gf) {
-  // first, we compute the forward kinematics
-  algorithms::forwardPosition(model, data, gc);
-  algorithms::forwardVelocity(model, data, gc, gv);
-  algorithms::compositeInertia(model, data, gc);
-
-  // forward pass where we compute and update the velocity and acceleration
-  // expressed at the world frame
-  data.ov.resize(model.nbodies_);
-  data.oa_gf.resize(model.nbodies_);
-  data.oh.resize(model.nbodies_);
-  data.of.resize(model.nbodies_);
-  data.spatialInertia6.resize(model.nbodies_);
-
-  data.spatialInertia6[0] = Eigen::MatrixXd::Zero(6, 6);
-  data.oh[0] = Eigen::VectorXd::Zero(6);
-  data.of[0] = Eigen::VectorXd::Zero(6);
-  data.ov[0] = Eigen::VectorXd::Zero(6);
-  data.oa_gf[0] = Eigen::VectorXd::Zero(6);
-  // const Eigen::Vector3d gravity = Eigen::Vector3d(0.0, 0.0, -9.81);
-  // data.oa_gf[0].segment(0, 3) = -gravity; // linear acceleration
-
-  data.aXb.resize(model.nbodies_);
-
-  for (size_t i = 1; i < model.nbodies_; i++) {
-    auto joint = model.actuated_joints_[i];
-    auto parentId = model.parents_[i];
-
-    data.aXb[i] = algorithms::aXb(data.rot_WB[i], data.jointPos_W[i]);
-    if (joint->getType() != JointType::FIXED) {
-      // a bit shady way for the first body that can be fixed or floating
-      Eigen::VectorXd jv = data.motionSubspace[i] * gv[model.gv_idx_[i]];
-      data.ov[i] = data.aXb[i] * jv;
-      std::cout << "initial ov[" << i << "] = " << data.ov[i].transpose()
-                << std::endl;
-    }
-    if (parentId != -1)
-      data.ov[i] += data.ov[parentId];
-
-    // data.oa_gf[i] = Eigen::VectorXd::Zero(6);
-    if (parentId != -1)
-      data.oa_gf[i] = motionAct(data.ov[parentId], data.ov[i]);
-
-    std::cout << "oa_gf[" << i << "] = " << data.oa_gf[i].transpose()
-              << std::endl;
-
-    // the spatial inertia we get here is already data.oMi[i].act(inertia[i]);
-    // just because we have had already all the quantities computed for the
-    // world frame
-    Eigen::MatrixXd spatialInertia = Eigen::MatrixXd::Zero(6, 6);
-    {
-      auto r = data.comW[i];
-      auto m = model.bodies_[i]->getMass();
-      auto I = data.inertiaW[i];
-      spatialInertia.block<3, 3>(0, 0) = m * Eigen::Matrix3d::Identity();
-      spatialInertia.block<3, 3>(3, 3) = I - m * skew(r) * skew(r);
-      spatialInertia.block<3, 3>(0, 3) = -skew(r) * m;
-      spatialInertia.block<3, 3>(3, 0) = skew(r) * m;
-    }
-
-    data.spatialInertia6[i] = spatialInertia;
-    // std::cout << "Ybase " << i << " is " << data.spatialInertia6[i]
-    //           << std::endl;
-
-    // compute oh = I * v;
-    data.oh[i] = data.spatialInertia6[i] * data.ov[i];
-    // compute of = ov x oh;
-    data.of[i] = algorithms::cross(data.ov[i], data.oh[i]);
-  }
-
-  std::cout << "first oa_gf: " << data.oa_gf[0].transpose() << std::endl;
-}
-
-inline void aba_pass2(const Model &model, Data &data, const Eigen::VectorXd &gc,
-                      const Eigen::VectorXd &gv, const Eigen::VectorXd &gf) {
-  data.u = gf.eval();
-
-  data.U.resize(model.nbodies_);
-  data.Dinv.resize(model.nbodies_);
-  data.Jcols.resize(model.nbodies_);
-
-  // backward pass to update the forces and spatial inertias
-  // TODO: for the floating base we will iterate towards zero
-  for (int i = model.nbodies_ - 1; i >= 1; --i) {
-    auto link = model.bodies_[i];
-
-    auto joint = model.actuated_joints_[i];
-
-    Eigen::MatrixXd I6 = data.spatialInertia6[i];
-    Eigen::VectorXd fi = data.of[i];
-
-    auto ui = data.u.segment(model.gv_idx_[i], joint->gv_length());
-
-    // ui = tau_i - ST * fi
-    data.Jcols[i] = (data.aXb[i] * data.motionSubspace[i]);
-    ui -= data.Jcols[i].transpose() * fi;
-
-    // std::cout << "u: " << data.u.transpose() << std::endl;
-    // std::cout << "jcols: " << (aXb * data.motionSubspace[i]).transpose()
-    //           << std::endl;
-
-    // find U = Ia * S
-    data.U[i] = I6 * data.Jcols[i];
-    // find D = ST * U
-    Eigen::MatrixXd D = data.Jcols[i].transpose() * data.U[i];
-    // find Dinv
-    data.Dinv[i] = D.inverse();
-
-    // if there is parent, propagate the forces and inertia
-    // Ia -= U * Dinv * UT
-    // fi += I * oa_gf + UDinv * u_i
-    auto parentId = model.parents_[i];
-    if (parentId > 0) { // TODO: have to change for the floating base later
-      // Ia -= (data.U[i] * data.Dinv[i]) * data.U[i].transpose();
-      Eigen::MatrixXd Ia =
-          I6 - (data.U[i] * data.Dinv[i]) * data.U[i].transpose();
-      data.spatialInertia6[i] = Ia;
-
-      fi += Ia * data.oa_gf[i] + (data.U[i] * data.Dinv[i]) * ui;
-      data.of[i] = fi;
-
-      // propagate the inertia and force to the parent
-      data.spatialInertia6[parentId] += Ia;
-      std::cout << "inertia of " << parentId << " has been updated to "
-                << data.spatialInertia6[parentId] << std::endl;
-      data.of[parentId] += fi;
-    }
-  }
-}
-
-inline void aba_pass3(const Model &model, Data &data, const Eigen::VectorXd &gc,
-                      const Eigen::VectorXd &gv, const Eigen::VectorXd &gf) {
-  // forward pass to update the acceleration
-  Eigen::VectorXd ga = Eigen::VectorXd::Zero(model.gv_size_);
-  data.oa_gf[0] = Eigen::VectorXd::Zero(6);
-  const Eigen::Vector3d gravity = Eigen::Vector3d(0.0, 0.0, -9.81);
-  data.oa_gf[0].segment(0, 3) = -gravity; // linear acceleration
-  for (size_t i = 1; i < model.nbodies_; i++) {
-    auto joint = model.actuated_joints_[i];
-    auto parentId = model.parents_[i];
-
-    data.oa_gf[i] += data.oa_gf[parentId];
-    auto gai = ga.segment(model.gv_idx_[i], joint->gv_length());
-
-    Eigen::MatrixXd Ia = data.spatialInertia6[i];
-    Eigen::VectorXd fi = data.of[i];
-
-    auto ui = data.u.segment(model.gv_idx_[i], joint->gv_length());
-
-    gai = data.Dinv[i] * ui -
-          (data.U[i] * data.Dinv[i]).transpose() * data.oa_gf[i];
-    data.oa_gf[i] += data.Jcols[i] * gai;
-  }
-
-  std::cout << "Result of aba" << std::endl;
-  std::cout << "ga: " << ga.transpose() << std::endl;
-
-  data.dv = ga;
-}
-
-inline void articulatedBodyAlgorithm(const Model &model, Data &data,
-                                     const Eigen::VectorXd &gc,
-                                     const Eigen::VectorXd &gv,
-                                     const Eigen::VectorXd &gf) {
-
-  aba_pass1(model, data, gc, gv, gf);
-  aba_pass2(model, data, gc, gv, gf);
-  aba_pass3(model, data, gc, gv, gf);
-  return;
-
   // first, coming from root to the leaves we compute the kinematics and NE
   // terms Ma and ba
   algorithms::forwardVelocity(model, data, gc, gv);
   algorithms::forwardAcceleration(model, data, gc, gv, gv * 0.0, {0, 0, -9.81});
   algorithms::compositeInertia(model, data, gc);
 
-  // store the rigid-body bias forces and spatial inertia
-  std::vector<Eigen::VectorXd> Ba(model.nbodies_);
-  std::vector<Eigen::MatrixXd> Ma(model.nbodies_);
-  for (size_t i = 0; i < model.nbodies_; ++i) {
-    // zero vector for the bias forces
-    Ba[i] = Eigen::VectorXd::Zero(6);
+  // we have already computed the forward pass for kinematics
+  // now a few more fields specific to aba
+  data.aXb.resize(model.nbodies_);
+  data.XT.resize(model.nbodies_);
+  data.Ma.resize(model.nbodies_);
+  data.Pa.resize(model.nbodies_);
 
-    // find the current wrench from the relation
-    // f = v x I * v + f_ext
-    // TODO: decide whether to use the external forces or not
-    auto link = model.bodies_[i];
-    auto r = data.comW[i] - data.jointPos_W[i];
-    Ba[i].segment(0, 3) =
-        link->getMass() * Eigen::Matrix3d::Identity() * data.bodyLinAcc[i] -
-        link->getMass() * skew(r) * data.bodyAngAcc[i] +
-        link->getMass() * skew(data.bodyAngVel_w[i]) *
-            skew(data.bodyAngVel_w[i]) * r;
-
-    Ba[i].segment(3, 3) =
-        link->getMass() * skew(r) * data.bodyLinAcc[i] +
-        data.inertiaW[i] * data.bodyAngAcc[i] -
-        link->getMass() * skew(r) * skew(r) * data.bodyAngAcc[i] +
-        skew(data.bodyAngVel_w[i]) *
-            (data.inertiaW[i] - link->getMass() * skew(r) * skew(r)) *
-            data.bodyAngVel_w[i];
-
-    // find the spatial inertia
-    Ma[i] = Eigen::MatrixXd::Zero(6, 6);
-    Ma[i].block<3, 3>(0, 0) = link->getMass() * Eigen::Matrix3d::Identity();
-    Ma[i].block<3, 3>(0, 3) = -skew(r) * link->getMass();
-    Ma[i].block<3, 3>(3, 0) = skew(r) * link->getMass();
-    Ma[i].block<3, 3>(3, 3) =
-        data.inertiaW[i] - link->getMass() * skew(r) * skew(r);
-    // if (i != 0) {
-    // } else {
-    //   Ma[i].block<3, 3>(3, 3) = data.inertiaW[i];
-    // }
-  }
-
-  // compute the ba terms, those are like in nonlinearities,
-  // but we don't need to accumulate them
-
-  // second, from leaves to the root we compute the
-  // articulated inertia and fictitious forces but for the subtree
-
-  const int root =
-      (model.actuated_joints_[0]->getType() != JointType::FLOATING) ? 1 : 0;
-  for (int i = model.nbodies_ - 1; i >= root; --i) {
-    // if there is a parent, we need to add up the effect
-    // of articulated inertia and bias force to it
-
-    auto rpb = data.joint2joint_W[i]; // child to parent vector
-    Eigen::MatrixXd Xbp = Eigen::MatrixXd::Identity(6, 6);
-    Xbp.block(3, 0, 3, 3) = skew(rpb);
-    Eigen::MatrixXd XbpT = Xbp.transpose();
-    Eigen::MatrixXd dXbp = Eigen::MatrixXd::Zero(6, 6);
-    dXbp.block(3, 0, 3, 3) = skew(data.bodyAngVel_w[i].cross(rpb));
-    Eigen::MatrixXd dXbpT = dXbp.transpose();
-
-    Eigen::MatrixXd S = data.motionSubspace[i];
-    Eigen::MatrixXd ST = S.transpose();
-    Eigen::MatrixXd dS = data.dMotionSubspace[i];
-    Eigen::MatrixXd dST = dS.transpose();
-
-    Eigen::VectorXd W = Eigen::VectorXd::Zero(6);
-    W.segment(0, 3) = data.bodyLinVel_w[i];
-    W.segment(3, 3) = data.bodyAngVel_w[i];
-
-    // find the velocity for the body
-    auto v_start = model.gv_idx_[i];
-    auto v_len = model.actuated_joints_[i]->gv_length();
-    auto gvi = gv.segment(v_start, v_len);
-    auto gfi = gf.segment(v_start, v_len);
-
-    // auto Ui = Ma[i] * S; // 6xjoint_dof
-    // auto Di = ST * Ui;
-
-    // auto ui = gfi - ST * Ba[i];
-
+  for (size_t i = 0; i < model.nbodies_; i++) {
+    auto joint = model.actuated_joints_[i];
     auto parentId = model.parents_[i];
-    if (parentId == -1) {
-      // this is the root, we don't need to do anything
-      continue;
+
+    data.aXb[i] = algorithms::aXb(data.rot_WB[i], data.jointPos_W[i]);
+    data.XT[i] =
+        algorithms::aXb(Eigen::Matrix3d::Identity(), -data.joint2joint_W[i]);
+
+    // articulated inertia and bias force
+    data.Ma[i] = Eigen::MatrixXd::Zero(6, 6);
+    {
+      auto m = model.bodies_[i]->getMass();
+      auto I = data.inertiaW[i];
+      auto r = data.comW[i] - data.jointPos_W[i];
+      data.Ma[i].block<3, 3>(0, 0) = m * Eigen::Matrix3d::Identity();
+      data.Ma[i].block<3, 3>(0, 3) = -skew(r) * m;
+      data.Ma[i].block<3, 3>(3, 0) = skew(r) * m;
+      data.Ma[i].block<3, 3>(3, 3) = I - m * skew(r) * skew(r);
+    }
+    data.Pa[i] = Eigen::VectorXd::Zero(6);
+    {
+      // find the current wrench from the relation
+      // f = v x I * v + f_ext
+      // TODO: decide whether to use the external forces or not
+      // NOTE: we don't include the gravity here, it should be done later
+      auto link = model.bodies_[i];
+      auto r = data.comW[i] - data.jointPos_W[i];
+      data.Pa[i].segment(0, 3) = link->getMass() * skew(data.bodyAngVel_w[i]) *
+                                 skew(data.bodyAngVel_w[i]) * r;
+
+      data.Pa[i].segment(3, 3) =
+          skew(data.bodyAngVel_w[i]) *
+          (data.inertiaW[i] - link->getMass() * skew(r) * skew(r)) *
+          data.bodyAngVel_w[i];
+    }
+  }
+}
+inline void aba_pass2(const Model &model, Data &data, const Eigen::VectorXd &gc,
+                      const Eigen::VectorXd &gv, const Eigen::VectorXd &gf) {
+  // from leaves to the root, we should merge the articulated inertia
+  data.STMaXT.resize(model.nbodies_);
+  data.STMa.resize(model.nbodies_);
+  data.STMaSinvSTMaXT.resize(model.nbodies_);
+  data.SdotUpXdotTV.resize(model.nbodies_);
+  data.Xbp.resize(model.nbodies_);
+  data.dXbpT.resize(model.nbodies_);
+  data.W.resize(model.nbodies_);
+  data.STMaSinv.resize(model.nbodies_);
+
+  for (int i = model.nbodies_ - 1; i >= 1; --i) {
+    auto joint = model.actuated_joints_[i];
+    auto parentId = model.parents_[i];
+
+    // simply access
+    auto &Ma = data.Ma;
+    auto &Pa = data.Pa;
+    Eigen::MatrixXd S = data.S[i];                // 6xjoint_dof
+    Eigen::MatrixXd Xbp = data.XT[i].transpose(); // 6x6
+    Eigen::MatrixXd XbpT = Xbp.transpose();
+    Eigen::MatrixXd ST = S.transpose(); // joint_dof x 6
+    Eigen::MatrixXd dS = data.dS[i];    // 6xjoint_dof
+
+    Eigen::MatrixXd dXbpT = Eigen::MatrixXd::Zero(6, 6);
+    {
+      // dXbp is the derivative of Xbp with respect to the joint position
+      // it is computed as a cross product of the body angular velocity and
+      // the joint2joint vector
+      dXbpT.block<3, 3>(0, 3) =
+          skew(data.bodyAngVel_w[parentId].cross(-data.joint2joint_W[i]));
     }
 
-    // find the articulated inertia
-    Ma[parentId] +=
-        Xbp * Ma[i] *
-        (-S * (ST * Ma[i] * S).inverse() * (ST * Ma[i] * XbpT) + XbpT);
-    Ba[parentId] +=
-        Xbp *
-        (Ma[i] * (S * (ST * Ma[i] * S).inverse() *
-                      (gfi - ST * Ma[i] * (dS * gvi + dXbpT * W) - ST * Ba[i]) +
-                  dS * gvi + dXbpT * W) +
-         Ba[i]);
-  }
+    data.Xbp[i] = Xbp;
+    data.dXbpT[i] = dXbpT;
 
-  // third, from root to the leaves we compute the
-  // u_dot and then acceleration terms
-  Eigen::VectorXd u_dot = Eigen::VectorXd::Zero(model.gv_size_);
-  std::vector<Eigen::VectorXd> Wdot(model.nbodies_); // acceleration of bodies
+    // Eigen::MatrixXd dXbpT = data.XT[i].transpose(); // 6x6
+    Eigen::MatrixXd gfi = gf.segment(model.gv_idx_[i], joint->gv_length());
+    Eigen::MatrixXd gvi = gv.segment(model.gv_idx_[i], joint->gv_length());
+    Eigen::VectorXd W = Eigen::VectorXd::Zero(6);
+    {
+      W.segment(0, 3) = data.bodyLinVel_w[parentId];
+      W.segment(3, 3) = data.bodyAngVel_w[parentId];
+    }
+    data.W[i] = W;
+
+    // simplifications
+    data.STMa[i] = ST * Ma[i];
+    data.STMaXT[i] = ST * Ma[i] * XbpT;
+    // NOTE: we can do it only because we take care of the floating joint
+    // separately
+    data.STMaSinv[i] = (data.STMa[i] * S).inverse()(0);
+    data.STMaSinvSTMaXT[i] = data.STMaSinv[i] * data.STMaXT[i];
+    data.SdotUpXdotTV[i] = dS * gvi + dXbpT * W;
+
+    // find the articulated inertia
+    Ma[parentId] += Xbp * Ma[i] * (-S * data.STMaSinvSTMaXT[i] + XbpT);
+    Pa[parentId] +=
+        Xbp *
+        (Ma[i] * (S * data.STMaSinv[i] *
+                      (gfi - data.STMa[i] * data.SdotUpXdotTV[i] - ST * Pa[i]) +
+                  data.SdotUpXdotTV[i]) +
+         Pa[i]);
+  }
+}
+inline void aba_pass3(const Model &model, Data &data, const Eigen::VectorXd &gc,
+                      const Eigen::VectorXd &gv, const Eigen::VectorXd &gf) {
+  // now forward pass where we will update the acceleration
+  data.udot = Eigen::VectorXd::Zero(model.gv_size_);
+  data.Wdot.resize(model.nbodies_);
 
   if (model.actuated_joints_[0]->getType() == JointType::FLOATING) {
     // for floating base we have the first 6 entries
     // of the generalized velocity vector
-    Wdot[0] = Ma[0].inverse() * (gf.segment(0, 6) - Ba[0]); // base is zero
-    u_dot.segment(0, 6) = Wdot[0];
+    data.Wdot[0] =
+        data.Ma[0].inverse() * (gf.segment(0, 6) - data.Pa[0]); // base is zero
+    data.udot.segment(0, 6) = data.Wdot[0];
+
+    // add gravitation
+    data.udot(2) -= 9.81; // add gravity to the vertical component
   } else {
     // for fixed base we have the first 6 entries
     // of the generalized velocity vector as zero
-    Wdot[0] = Eigen::VectorXd::Zero(6);
+    data.Wdot[0] = Eigen::VectorXd::Zero(6);
   }
 
-  for (size_t i = 1; i < model.nbodies_; ++i) {
+  for (int i = 1; i < model.nbodies_; ++i) {
+    auto joint = model.actuated_joints_[i];
     auto parentId = model.parents_[i];
 
-    auto rpb = data.joint2joint_W[i]; // child to parent vector
-    Eigen::MatrixXd Xbp = Eigen::MatrixXd::Identity(6, 6);
-    Xbp.block(3, 0, 3, 3) = skew(rpb);
-    Eigen::MatrixXd XbpT = Xbp.transpose();
-    Eigen::MatrixXd dXbp = Eigen::MatrixXd::Zero(6, 6);
-    dXbp.block(3, 0, 3, 3) = skew(data.bodyAngVel_w[i].cross(rpb));
-    Eigen::MatrixXd dXbpT = dXbp.transpose();
-
-    Eigen::MatrixXd S = data.motionSubspace[i];
-    Eigen::MatrixXd ST = S.transpose();
-    Eigen::MatrixXd dS = data.dMotionSubspace[i];
-    Eigen::MatrixXd dST = dS.transpose();
-
-    Eigen::VectorXd W = Eigen::VectorXd::Zero(6);
-    W.segment(0, 3) = data.bodyLinVel_w[parentId];
-    W.segment(3, 3) = data.bodyAngVel_w[parentId];
-
-    // find the velocity for the body
+    // get the generalized velocity vector
     auto v_start = model.gv_idx_[i];
-    auto v_len = model.actuated_joints_[i]->gv_length();
-    auto gvi = gv.segment(v_start, v_len);
+    auto v_len = joint->gv_length();
+
+    // get the generalized force vector
     auto gfi = gf.segment(v_start, v_len);
+    auto gvi = gv.segment(v_start, v_len);
 
-    // first, compute the acceleration in generalized coordinates
-    u_dot.segment(v_start, v_len) =
-        (ST * Ma[i] * S).inverse() *
-        (gfi - ST * Ma[i] * (dS * gvi + XbpT * Wdot[parentId] + dXbpT * W) -
-         ST * Ba[i]);
+    data.udot.segment(v_start, v_len) =
+        data.STMaSinv[i] *
+        (gfi -
+         data.STMa[i] * (data.SdotUpXdotTV[i] +
+                         data.Xbp[i].transpose() * data.Wdot[parentId]) -
+         data.S[i].transpose() * data.Pa[i]);
 
-    // then compute the acceleration of the body in spatial coordinates
-    Wdot[i] = S * u_dot.segment(v_start, v_len) + dS * gvi +
-              XbpT * Wdot[parentId] + dXbpT * W;
+    data.Wdot[i] = data.SdotUpXdotTV[i] +
+                   data.S[i] * data.udot.segment(v_start, v_len) +
+                   data.Xbp[i].transpose() * data.Wdot[parentId];
   }
+}
+} // namespace aba
 
-  std::cout << "u_dot: " << u_dot.transpose() << std::endl;
+inline void articulatedBodyAlgorithm(const Model &model, Data &data,
+                                     const Eigen::VectorXd &gc,
+                                     const Eigen::VectorXd &gv,
+                                     const Eigen::VectorXd &gf) {
+  aba::aba_pass1(model, data, gc, gv, gf);
+  aba::aba_pass2(model, data, gc, gv, gf);
+  aba::aba_pass3(model, data, gc, gv, gf);
 }
 
 inline void setState(const Model &model, Data &data, const Eigen::VectorXd &gc,
