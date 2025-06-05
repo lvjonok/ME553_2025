@@ -534,6 +534,8 @@ inline void aba_pass2(const Model &model, Data &data, const Eigen::VectorXd &gc,
     Eigen::MatrixXd XbpT = Xbp.transpose();
     Eigen::MatrixXd ST = S.transpose(); // joint_dof x 6
     Eigen::MatrixXd dS = data.dS[i];    // 6xjoint_dof
+    Eigen::MatrixXd gfi = gf.segment(model.gv_idx_[i], joint->gv_length());
+    Eigen::MatrixXd gvi = gv.segment(model.gv_idx_[i], joint->gv_length());
 
     Eigen::MatrixXd dXbpT = Eigen::MatrixXd::Zero(6, 6);
     {
@@ -542,14 +544,18 @@ inline void aba_pass2(const Model &model, Data &data, const Eigen::VectorXd &gc,
       // the joint2joint vector
       dXbpT.block<3, 3>(0, 3) =
           skew(data.bodyAngVel_w[parentId].cross(-data.joint2joint_W[i]));
+
+      // For the prismatic joint, it is not as simple, we have to
+      // account for the linear component along the axis in the world frame
+      if (joint->getType() == JointType::PRISMATIC) {
+        dXbpT.block<3, 3>(0, 3) += skew(-data.jointAxis_W[i] * gvi);
+      }
     }
 
     data.Xbp[i] = Xbp;
     data.dXbpT[i] = dXbpT;
 
     // Eigen::MatrixXd dXbpT = data.XT[i].transpose(); // 6x6
-    Eigen::MatrixXd gfi = gf.segment(model.gv_idx_[i], joint->gv_length());
-    Eigen::MatrixXd gvi = gv.segment(model.gv_idx_[i], joint->gv_length());
     Eigen::VectorXd W = Eigen::VectorXd::Zero(6);
     {
       W.segment(0, 3) = data.bodyLinVel_w[parentId];
@@ -595,6 +601,8 @@ inline void aba_pass3(const Model &model, Data &data, const Eigen::VectorXd &gc,
     // for fixed base we have the first 6 entries
     // of the generalized velocity vector as zero
     data.Wdot[0] = Eigen::VectorXd::Zero(6);
+    // TODO: something is messed up
+    data.Wdot[0](2) = 9.81;
   }
 
   for (int i = 1; i < model.nbodies_; ++i) {
